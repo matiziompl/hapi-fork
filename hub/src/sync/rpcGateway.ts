@@ -52,6 +52,7 @@ import type {
 } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
+import { buildAgentStatusCommand } from './agentStatusProbe'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
@@ -209,6 +210,13 @@ export class RpcGateway {
         return {
             ...(typeof pid === 'number' ? { pid } : {}),
             ...(typeof processStartMarker === 'string' ? { processStartMarker } : {}),
+        }
+    }
+
+    async closeSession(sessionId: string): Promise<void> {
+        const response = await this.sessionRpc(sessionId, RPC_METHODS.CloseSession, {})
+        if (!response || typeof response !== 'object' || (response as { success?: unknown }).success !== true) {
+            throw new Error('Session close was not acknowledged')
         }
     }
 
@@ -468,6 +476,12 @@ export class RpcGateway {
 
     async listSlashCommands(sessionId: string, agent: string): Promise<SlashCommandsResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListSlashCommands, { agent }) as SlashCommandsResponse
+    }
+
+    async getAgentStatus(sessionId: string, flavor: 'codex' | 'agy'): Promise<RpcCommandResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.Bash, {
+            command: buildAgentStatusCommand(flavor), timeout: 15_000,
+        }, 20_000) as RpcCommandResponse
     }
 
     async listSkills(sessionId: string, flavor?: string): Promise<{

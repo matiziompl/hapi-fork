@@ -14,6 +14,7 @@ import { codexHome, saveRuntime, runtimeDirectory, runtimeAuthHash, findColdBind
 import { startCodexGateway, record, string, type Envelope } from './gateway';
 import { resolveSharedCodex, sharedLaunchConfig, initializeSharedClient, checkSharedCapabilities, takeReservedSessionId, type SharedLaunchOptions } from './launch';
 import { SharedCodexRoot } from './root';
+import { findLoadedCodexEndpoint } from './existingServer';
 
 export type RuntimeReady = { sessionId: string; runtime: CodexRuntimeRecord };
 type Reservation = { root: SharedCodexRoot; resumeId?: string };
@@ -38,7 +39,7 @@ async function freePort(): Promise<number> {
     await new Promise<void>(resolve => server.close(() => resolve())); return address.port;
 }
 
-/** One ordinary CLI execution owns one private engine, with concurrent frontends. */
+/** A wrapper owns its private engine, or attaches to an already loaded local thread. */
 export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (ready: RuntimeReady) => void, abortSignal?: AbortSignal): Promise<void> {
     abortSignal?.throwIfAborted();
     const command = resolveSharedCodex();
@@ -47,10 +48,14 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     await mkdir(codexHome(), { recursive: true, mode: 0o700 });
     const home = await realpath(codexHome());
     await mkdir(runtimeDirectory(), { recursive: true, mode: 0o700 });
+    const existingEndpoint = options.resumeSessionId
+        ? await findLoadedCodexEndpoint(home, options.resumeSessionId, launch.cwd) : undefined;
+    abortSignal?.throwIfAborted();
+    const ownsEngine = !existingEndpoint;
     // Unix sockaddr_un has a small path limit; don't nest sockets under CODEX_HOME.
     const sockets = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'hapi-cx-')); await chmod(sockets, 0o700);
     const token = randomBytes(32).toString('hex');
-    const upstream = process.platform === 'win32' ? `ws://127.0.0.1:${await freePort()}` : `unix://${join(sockets, 'engine.sock')}`;
+    const upstream = existingEndpoint ?? (process.platform === 'win32' ? `ws://127.0.0.1:${await freePort()}` : `unix://${join(sockets, 'engine.sock')}`);
     const upstreamToken = process.platform === 'win32' ? randomBytes(32).toString('hex') : undefined;
     const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: home };
     // Every thread injects its own identity. A launch from another agent must not inherit that root's identity.
@@ -71,6 +76,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     let finish!: () => void;
     const done = new Promise<void>(resolve => { finish = resolve; });
     const ending = new Set<SharedCodexRoot>();
+    const closedWithoutArchive = new Set<SharedCodexRoot>();
     const roots = new Map<string, SharedCodexRoot>();
     const prepared = new Set<SharedCodexRoot>();
     const reservations = new Map<string, Reservation>();
@@ -129,7 +135,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
                 await Promise.race([
-                    Promise.allSettled([...prepared].filter(root => !ending.has(root)).map(root => root.suspend())),
+                    Promise.allSettled([...prepared].filter(root => !ending.has(root)).map(root => root.suspend(ownsEngine))),
                     new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })
                 ]);
             } finally { clearTimeout(timer); }
@@ -137,8 +143,8 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             if (server && server.exitCode === null && server.signalCode === null) {
                 if (!await killProcessByChildProcess(server)) throw new Error('Codex engine did not stop; ownership retained for orphan recovery');
             }
-            // Release ownership only after the engine is dead, BEFORE inactive
-            // reaches the hub. Web may immediately resume through the Runner.
+            // An owned engine must be dead before releasing its binding. For
+            // a borrowed engine only this wrapper's binding is released.
             for (const binding of Object.values(runtime.sessions)) binding.active = false;
             runtime.pendingCreations = [];
             await persist();
@@ -146,23 +152,29 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             failure ??= error;
             logger.debug('[Codex shared] shutdown', error);
         }).finally(async () => {
-            await Promise.allSettled([...prepared].map(root => root.close(ending.has(root))));
+            await Promise.allSettled([...prepared].map(root => closedWithoutArchive.has(root)
+                ? root.close(false, true, true)
+                : root.close(ending.has(root), !ownsEngine || !ending.has(root))));
             await rm(sockets, { recursive: true, force: true }).catch(error => logger.debug('[Codex shared] socket cleanup', error));
             finish();
         });
         return shutdownPromise;
     };
-    const end = async (root: SharedCodexRoot, nativeArchive = true): Promise<void> => {
+    const end = async (root: SharedCodexRoot, nativeArchive = true, archiveHub = true): Promise<void> => {
         if (!roots.has(root.threadId) || ending.has(root)) return;
         ending.add(root);
-        try { if (nativeArchive) await root.client.request('thread/archive', { threadId: root.threadId }); } catch (error) { ending.delete(root); throw error; }
+        try {
+            if (!archiveHub) { closedWithoutArchive.add(root); await root.prepareClose(); }
+            if (nativeArchive && ownsEngine) await root.client.request('thread/archive', { threadId: root.threadId });
+        } catch (error) { ending.delete(root); closedWithoutArchive.delete(root); throw error; }
         roots.delete(root.threadId);
         runtime.sessions[root.session.sessionId].active = false; await persist();
         // Let the RPC acknowledgement leave both gateway and hub sockets before detach.
         setTimeout(() => {
-            void root.close(true).then(async () => {
+            const cleanup = archiveHub ? root.close(true, !ownsEngine) : root.close(false, true, true);
+            void cleanup.then(async () => {
                 prepared.delete(root);
-                await notifyRunnerSessionStarted(root.session.sessionId, { ...root.bootstrap.metadata, lifecycleState: 'archived' });
+                await notifyRunnerSessionStarted(root.session.sessionId, { ...root.bootstrap.metadata, lifecycleState: archiveHub ? 'archived' : 'closed' });
                 if (roots.size === 0 && reservations.size === 0) await shutdown();
             }).catch(error => logger.debug('[Codex shared] root cleanup', error));
         }, 100);
@@ -213,7 +225,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         if (reserved && reserved.threadId !== threadId) throw new Error('Codex retargeted a reserved thread');
         if (!reserved) await reserve(root, threadId);
         // No fake user turn/name. Metadata write materializes an empty legacy rollout for native resume.
-        await control.request('thread/metadata/update', { threadId, gitInfo: gitInfo(string(record(response.thread).cwd) ?? root.bootstrap.workingDirectory) });
+        if (ownsEngine) await control.request('thread/metadata/update', { threadId, gitInfo: gitInfo(string(record(response.thread).cwd) ?? root.bootstrap.workingDirectory) });
         assertRunning();
         roots.set(threadId, root);
         await root.bind(threadId, response, subscribe);
@@ -221,7 +233,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         // Cold-resumed threads predate the control connection's automatic
         // new-thread subscription. Subscribe once without changing settings.
         await control.request('thread/resume', { threadId, excludeTurns: true });
-        await root.activate(initialOptions);
+        await root.activate(ownsEngine ? initialOptions : undefined);
         await root.session.flush();
         await persist();
         // The hub's view of the metadata is what the hub kept of it: a hub
@@ -273,7 +285,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             }
             if (candidate !== threadId && !existing) throw new Error('Resume the parent HAPI session before attaching a child agent');
         }
-        if (request.method === 'thread/resume' && existing) return { ...request, params: existing.config(params) };
+        if (request.method === 'thread/resume' && existing) return ownsEngine ? { ...request, params: existing.config(params) } : request;
         if (threadId) await withThreadOwnership(home, threadId, id, async () => {});
         const cwd = string(params.cwd) ?? existing?.bootstrap.workingDirectory ?? launch.cwd;
         const root = request.method === 'thread/resume' && threadId
@@ -320,16 +332,18 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     startup = (async () => {
         if (abortSignal?.aborted) throw new Error('Codex startup canceled');
         assertRunning();
-        server = spawn(command.command, [...command.args, 'app-server', ...launch.serverArgs, '--listen', upstream,
-            ...(upstreamToken ? ['--ws-auth', 'capability-token', '--ws-token-sha256', createHash('sha256').update(upstreamToken).digest('hex')] : [])],
-            { cwd: launch.cwd, env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
-        server.stderr?.on('data', data => logger.debug('[Codex shared] app-server', data.toString()));
-        server.once('error', error => { void shutdown(error); });
-        server.once('exit', (code, sig) => { void shutdown(new Error(`app-server exited (${code}, ${sig})`)); });
-        runtime.serverPid = server.pid;
-        runtime.serverMarker = server.pid ? getProcessStartMarker(server.pid) ?? undefined : undefined;
-        if (!runtime.serverPid || !runtime.serverMarker) throw new Error('Cannot verify app-server generation');
-        await persist();
+        if (ownsEngine) {
+            server = spawn(command.command, [...command.args, 'app-server', ...launch.serverArgs, '--listen', upstream,
+                ...(upstreamToken ? ['--ws-auth', 'capability-token', '--ws-token-sha256', createHash('sha256').update(upstreamToken).digest('hex')] : [])],
+                { cwd: launch.cwd, env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+            server.stderr?.on('data', data => logger.debug('[Codex shared] app-server', data.toString()));
+            server.once('error', error => { void shutdown(error); });
+            server.once('exit', (code, sig) => { void shutdown(new Error(`app-server exited (${code}, ${sig})`)); });
+            runtime.serverPid = server.pid;
+            runtime.serverMarker = server.pid ? getProcessStartMarker(server.pid) ?? undefined : undefined;
+            if (!runtime.serverPid || !runtime.serverMarker) throw new Error('Cannot verify app-server generation');
+            await persist();
+        }
         const deadline = Date.now() + 20_000;
         for (;;) {
             try { await initializeSharedClient(control); break; }
@@ -350,6 +364,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 const sid = string(record(params).sessionId); const root = [...roots.values()].find(root => root.session.sessionId === sid);
                 if (!root) throw new Error('Shared session not found');
                 if (method === 'hapi/stopSession') { await end(root); return { stopped: true }; }
+                if (method === 'hapi/closeSession') { await end(root, false, false); return { stopped: true }; }
                 if (method === 'hapi/attach') return { threadId: root.threadId };
                 throw new Error('Unknown runtime control');
             }) } });
@@ -375,7 +390,10 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 const root = await prepare(launch.cwd, existing);
                 await reserveRecord(root, threadId); return root;
             });
-            const params = root.config({ ...launch.threadParams, threadId, excludeTurns: true });
+            // A co-client must not override the model, MCP setup, identity or
+            // collaboration settings of the already running conversation.
+            const params = ownsEngine ? root.config({ ...launch.threadParams, threadId, excludeTurns: true })
+                : { threadId, excludeTurns: true };
             let response: Record<string, unknown>;
             try {
                 response = record(await root.client.request('thread/resume', params));

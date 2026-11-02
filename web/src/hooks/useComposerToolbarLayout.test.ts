@@ -19,6 +19,7 @@ describe('DEFAULT_COMPOSER_TOOLBAR_LAYOUT', () => {
             'voiceMic',
             'scratchlist',
             'schedule',
+            'status',
             'abort',
         ])
         expect(DEFAULT_COMPOSER_TOOLBAR_LAYOUT.hidden).toEqual([])
@@ -82,11 +83,11 @@ describe('normalizeComposerToolbarLayout', () => {
             'effort',
             'terminal',
             'expand',
+            'status',
             'abort',
-            'switch',
             'attachment',
+            'switch',
             'voiceMic',
-            'scratchlist',
         ])
         expect(result.left).toHaveLength(layout.left.length)
     })

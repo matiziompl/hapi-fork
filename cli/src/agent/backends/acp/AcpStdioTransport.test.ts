@@ -40,7 +40,7 @@ vi.mock('./agentCliGuard', () => ({
 }));
 
 vi.mock('@/utils/process', () => ({
-    killProcessByChildProcess: vi.fn(async () => undefined)
+    killProcessByChildProcess: vi.fn(async () => true)
 }));
 
 vi.mock('node:child_process', () => ({
@@ -135,6 +135,14 @@ describe('AcpStdioTransport agent CLI guard', () => {
         await transport.close();
         expect(guard.unregister).toHaveBeenCalledTimes(1);
         expect(guard.unregister).toHaveBeenCalledWith({ childPid: 424242 });
+    });
+
+    test('keeps the guard and rejects close when process termination is unconfirmed', async () => {
+        const transport = await AcpStdioTransport.create({ command: 'agent', args: ['acp'] });
+        vi.mocked(killProcessByChildProcess).mockResolvedValueOnce(false);
+        await expect(transport.close()).rejects.toThrow('termination');
+        expect(guard.unregister).not.toHaveBeenCalled();
+        await transport.close();
     });
 
     test('registers the ACP guard before spawn so list-models cannot race the new child', async () => {

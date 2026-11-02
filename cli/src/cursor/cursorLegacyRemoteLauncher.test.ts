@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
+import { killProcessByChildProcess } from '@/utils/process';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
@@ -23,9 +24,11 @@ vi.mock('@/agent/messageConverter', () => ({
 vi.mock('@/ui/ink/OpencodeDisplay', () => ({
     OpencodeDisplay: () => null
 }));
+// These launcher tests run without a TTY; do not load Ink's terminal renderer.
+vi.mock('ink', () => ({ render: vi.fn() }));
 
 vi.mock('@/utils/process', () => ({
-    killProcessByChildProcess: vi.fn(async () => {})
+    killProcessByChildProcess: vi.fn(async () => true)
 }));
 
 import { MessageQueue2 } from '@/utils/MessageQueue2';
@@ -35,16 +38,20 @@ import type { EnhancedMode } from './loop';
 type ChildOptions = {
     exitCode?: number | null;
     stderr?: string;
+    manualClose?: boolean;
 };
 
 function makeChild(opts: ChildOptions = {}) {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
+    let closeHandler: ((...args: unknown[]) => void) | undefined;
     const child = {
         stdout,
         stderr,
         on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
             if (event === 'close') {
+                closeHandler = handler;
+                if (opts.manualClose) return;
                 setImmediate(() => {
                     if (opts.stderr) {
                         // emit synchronously so runAgentProcess captures it before
@@ -57,7 +64,8 @@ function makeChild(opts: ChildOptions = {}) {
         }),
         emitStdout(line: string) {
             stdout.write(`${line}\n`);
-        }
+        },
+        emitClose() { closeHandler?.(0, null); }
     };
     return child;
 }
@@ -91,6 +99,24 @@ function makeSession(queue: MessageQueue2<EnhancedMode>, client: ReturnType<type
 }
 
 describe('cursorLegacyRemoteLauncher', () => {
+    it.each([true, false])('awaits full process termination on close (confirmed=%s)', async confirmed => {
+        const child = makeChild({ manualClose: true }); spawnMock.mockReturnValue(child);
+        const queue = new MessageQueue2<EnhancedMode>(() => 'm'); queue.push('hello', { permissionMode: 'default' });
+        const client = makeClient(); const session = makeSession(queue, client);
+        const { cursorLegacyRemoteLauncher } = await import('./cursorLegacyRemoteLauncher');
+        let finished = false;
+        const running = cursorLegacyRemoteLauncher(session);
+        const result = running.then(value => { finished = true; return value; }, error => { finished = true; throw error; });
+        await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+        let stop!: (value: boolean) => void;
+        vi.mocked(killProcessByChildProcess).mockImplementationOnce(() => new Promise(resolve => { stop = resolve; }));
+        const switchHandler = client.rpcHandlerManager.registerHandler.mock.calls.find(([method]) => method === 'switch')?.[1];
+        await switchHandler?.({}); child.emitClose();
+        await new Promise(resolve => setImmediate(resolve)); expect(finished).toBe(false);
+        stop(confirmed);
+        if (confirmed) await expect(result).resolves.toBe('switch');
+        else await expect(result).rejects.toThrow('termination');
+    });
     beforeEach(() => {
         spawnMock.mockReset();
         process.stdin.isTTY = false;

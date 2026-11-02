@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRunnerLifecycle } from './runnerLifecycle';
 import type { RunnerLifecycle } from './runnerLifecycle';
+import { afterEach } from 'vitest';
+
+afterEach(() => vi.restoreAllMocks());
 
 // Mock heavy deps
 vi.mock('@/ui/logger', () => ({
@@ -41,6 +44,24 @@ function createMockApiSessionWithMetadataCapture() {
 }
 
 describe('createRunnerLifecycle', () => {
+    it('provides a close RPC that cleans up the agent and preserves an unarchived closed conversation', async () => {
+        const session = createMockApiSessionWithMetadataCapture()
+        const handlers = new Map<string, () => unknown>()
+        Object.assign(session, { rpcHandlerManager: { registerHandler: (name: string, handler: () => unknown) => handlers.set(name, handler) } })
+        vi.spyOn(process, 'on').mockReturnValue(process)
+        const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+        const stopAgent = vi.fn(async () => {})
+        const lifecycle = createRunnerLifecycle({ session, logTag: 'test', onBeforeClose: stopAgent })
+        lifecycle.registerProcessHandlers()
+        expect(handlers.get('closeSession')).toBeDefined()
+        expect(handlers.get('closeSession')?.()).toEqual({ success: true })
+        await new Promise(resolve => setImmediate(resolve))
+        expect(stopAgent).toHaveBeenCalledOnce()
+        expect(session.metadataWrites.at(-1)).toMatchObject({ lifecycleState: 'closed' })
+        expect(session.metadataWrites.at(-1)).not.toHaveProperty('archivedBy')
+        expect(session.metadataWrites.at(-1)).not.toHaveProperty('archiveReason')
+        expect(exit).toHaveBeenCalledWith(0)
+    })
     let lifecycle: RunnerLifecycle;
 
     beforeEach(() => {

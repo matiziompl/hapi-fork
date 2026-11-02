@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { TraceSection } from '@/components/ToolCard/trace'
 import { isSubagentToolName } from '@/chat/subagentTool'
+import { FileCodePreview, getFileCodePreviews } from './FileCodePreview'
 
 const ELAPSED_INTERVAL_MS = 1000
 const TERMINAL_RELATED_TOOL_NAMES = new Set([
@@ -454,9 +455,13 @@ function ToolCardInner(props: ToolCardProps) {
         ? getSubagentModel(props.block.children, getInputStringAny(props.block.tool.input, ['model']))
         : null
     const isCodexAgentCard = toolName === 'CodexAgent'
+    const filePreviews = useMemo(() => getFileCodePreviews(props.block.tool), [
+        props.block.tool.name, props.block.tool.input, props.block.tool.result,
+        props.block.tool.state, props.block.tool.nativeKind,
+    ])
     const isTerminalTool = isTerminalToolBlock(props.block)
-    const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode, isTerminalTool)
-    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode, isTerminalTool)
+    const useCompactTerminalCard = filePreviews.length === 0 && shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode, isTerminalTool)
+    const showInline = filePreviews.length === 0 && shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode, isTerminalTool)
     const CompactToolView = showInline ? getToolViewComponent(toolName, props.block.tool) : null
     const compactViewOwnsInteractions = toolName === 'CodexDiff'
     const ResultToolView = getToolResultViewComponent(toolName)
@@ -468,7 +473,7 @@ function ToolCardInner(props: ToolCardProps) {
         permission.status === 'resolved' || permission.status === 'pending'
         || ((permission.status === 'denied' || permission.status === 'canceled') && Boolean(permission.reason))
     ))
-    const hasBody = showInline || taskSummary !== null || showsPermissionFooter
+    const hasBody = filePreviews.length > 0 || showInline || taskSummary !== null || showsPermissionFooter
     // Header/content padding already supplies 12-16px below timing; add only
     // the remainder needed to match the detail dialog's 16px section gap.
     const inlineBodySpacing = props.block.tool.state === 'pending'
@@ -580,6 +585,7 @@ function ToolCardInner(props: ToolCardProps) {
 
             {hasBody ? (
                 <CardContent className="px-3 pb-3 pt-1">
+                    {filePreviews.length > 0 ? <FileCodePreview previews={filePreviews} state={props.block.tool.state} /> : null}
                     {taskSummary ? (
                         <div className="mt-2">
                             {taskSummary}

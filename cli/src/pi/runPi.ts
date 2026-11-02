@@ -297,10 +297,9 @@ export async function runPi(opts: {
         session: apiSession,
         logTag: 'pi',
         stopKeepAlive: () => piSession.stopKeepAlive(),
-        onAfterClose: () => {
-            piSession.stopKeepAlive();
+        onBeforeClose: async () => {
             killedByCleanup = true;
-            transport.kill();
+            await transport.close();
         }
     });
 

@@ -413,7 +413,9 @@ export class AcpStdioTransport {
 
     async close(): Promise<void> {
         this.process.stdin.end();
-        await killProcessByChildProcess(this.process);
+        if (!await killProcessByChildProcess(this.process)) {
+            throw new Error('ACP process termination was not confirmed');
+        }
         this.releaseAgentCliGuard();
         this.markClosed(new Error('ACP transport closed'));
     }

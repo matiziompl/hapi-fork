@@ -105,7 +105,8 @@ export async function runCopilot(opts: {
     const lifecycle = createRunnerLifecycle({
         session,
         logTag: 'copilot',
-        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive()
+        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive(),
+        onBeforeClose: () => sessionWrapperRef.current?.kill()
     });
 
     lifecycle.registerProcessHandlers();

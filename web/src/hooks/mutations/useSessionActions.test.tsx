@@ -58,6 +58,15 @@ describe('useSessionActions - local archive progress', () => {
 })
 
 describe('useSessionActions - reopenSession', () => {
+    it('closes only the chosen session through the close API', async () => {
+        const closeSession = vi.fn(async () => {})
+        const archiveSession = vi.fn(async () => {})
+        const api = { closeSession, archiveSession } as unknown as ApiClient
+        const { result } = renderHook(() => useSessionActions(api, 'session-A'), { wrapper: createWrapper() })
+        await act(async () => { await result.current.closeSession() })
+        expect(closeSession).toHaveBeenCalledWith('session-A')
+        expect(archiveSession).not.toHaveBeenCalled()
+    })
     it('invokes api.reopenSession with the session id and forwards the response', async () => {
         const reopen = vi.fn(async (_sessionId: string) => ({
             ok: true as const,

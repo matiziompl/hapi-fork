@@ -3,6 +3,10 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
 const mockSpawn = vi.fn();
+const mockStopProcess = vi.fn();
+vi.mock('@/utils/process', () => ({
+    get killProcessByChildProcess() { return mockStopProcess; }
+}));
 vi.mock('node:child_process', () => ({
     get spawn() { return mockSpawn; }
 }));
@@ -44,6 +48,25 @@ describe('PiTransport', () => {
         vi.clearAllMocks();
         mockProcess = createMockProcess();
         mockSpawn.mockReturnValue(mockProcess);
+    });
+
+    it('awaits confirmed process termination before close completes', async () => {
+        const transport = new PiTransport({ command: 'pi', args: [], cwd: '/work' });
+        transport.start();
+        let stop!: (value: boolean) => void;
+        mockStopProcess.mockImplementationOnce(() => new Promise<boolean>(resolve => { stop = resolve; }));
+        let closed = false;
+        const closing = transport.close().then(() => { closed = true; });
+        await new Promise(resolve => setImmediate(resolve));
+        expect(closed).toBe(false);
+        stop(true); await closing;
+        expect(mockStopProcess).toHaveBeenCalledWith(mockProcess);
+    });
+
+    it('reports an unconfirmed process stop as a failure', async () => {
+        const transport = new PiTransport({ command: 'pi', args: [], cwd: '/work' });
+        transport.start(); mockStopProcess.mockResolvedValueOnce(false);
+        await expect(transport.close()).rejects.toThrow('termination');
     });
 
     describe('start()', () => {

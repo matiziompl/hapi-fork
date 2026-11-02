@@ -1,0 +1,29 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: local/hapi-hub:latest
+    container_name: hapi-hub
+    restart: unless-stopped
+    init: true
+
+    environment:
+      HOME: /home/node
+      HAPI_LISTEN_HOST: "0.0.0.0"
+      HAPI_LISTEN_PORT: "3006"
+      HAPI_PUBLIC_URL: "http://192.168.1.102:3006"
+      CORS_ORIGINS: "http://192.168.1.102:3006,http://localhost:3006"
+
+    ports:
+      - "3006:3006"
+
+    volumes:
+      - ./data:/home/node/.hapi
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL

@@ -533,6 +533,45 @@ describe('ComposerButtons responsive toolbar', () => {
     })
 })
 
+describe('ComposerButtons agent status', () => {
+    afterEach(() => { cleanup(); localStorage.clear() })
+
+    function toolbar(overrides: Partial<ComponentProps<typeof ComposerButtons>> = {}) {
+        const noop = () => {}
+        return <RuntimeProviders><ComposerButtons
+            canSend={false} controlsDisabled={false} showSettingsButton={false}
+            onSettingsToggle={noop} expanded={false} onExpandedToggle={noop}
+            showTerminalButton={false} terminalDisabled={false} terminalLabel="Terminal" onTerminal={noop}
+            showAbortButton={false} abortDisabled={false} isAborting={false} onAbort={noop}
+            showSwitchButton={false} switchDisabled={false} isSwitching={false} onSwitch={noop}
+            voiceEnabled={false} voiceStatus="disconnected" onVoiceToggle={noop} onSend={noop}
+            {...overrides}
+        /></RuntimeProviders>
+    }
+
+    it('opens status independently of sending the current draft and blocks duplicate clicks while pending', () => {
+        const onStatus = vi.fn()
+        const onSend = vi.fn()
+        const view = render(toolbar({ onStatus, onSend }))
+        fireEvent.click(screen.getByRole('button', { name: 'Status and limits' }))
+        expect(onStatus).toHaveBeenCalledTimes(1)
+        expect(onSend).not.toHaveBeenCalled()
+        view.rerender(toolbar({ onStatus, statusPending: true }))
+        const button = screen.getByRole('button', { name: 'Status and limits' })
+        expect((button as HTMLButtonElement).disabled).toBe(true)
+        fireEvent.click(button)
+        expect(onStatus).toHaveBeenCalledTimes(1)
+    })
+
+    it('honors the persisted hidden setting and keeps it hidden after layout normalization', () => {
+        localStorage.setItem('hapi-composer-toolbar-layout', JSON.stringify({
+            mode: 'left', left: ['attachment'], right: [], hidden: ['status'],
+        }))
+        render(toolbar({ onStatus: vi.fn() }))
+        expect(screen.queryByRole('button', { name: 'Status and limits' })).toBeNull()
+    })
+})
+
 describe('ComposerButtons terminal To agent FUE', () => {
     afterEach(() => {
         cleanup()

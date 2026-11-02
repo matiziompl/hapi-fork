@@ -470,12 +470,32 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // Check if we already have this PID (runner-spawned)
       const existingSession = pidToTrackedSession.get(pid);
 
+      if (sessionMetadata.capabilities?.concurrentClients
+        && (sessionMetadata.lifecycleState === 'archived' || sessionMetadata.lifecycleState === 'closed')) {
+        if (sessionMetadata.hostStartMarker && sessionMetadata.hostStartMarker !== getProcessStartMarker(pid)) return;
+        delete existingSession?.sharedSessions?.[sessionId];
+        // Release this root, not the wrapper: siblings may still be running.
+        // Old exit callbacks must no longer refer to a reopened generation.
+        if (existingSessionIdByChildPid.get(pid) === sessionId) {
+          releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
+        }
+        if (existingSession?.happySessionId === sessionId) {
+          delete existingSession.happySessionId;
+          delete existingSession.happySessionMetadataFromLocalWebhook;
+        }
+        if (existingSession?.requestedHappySessionId === sessionId) delete existingSession.requestedHappySessionId;
+        if (pidToRequestedSessionId.get(pid) === sessionId) pidToRequestedSessionId.delete(pid);
+        if (pidToConfirmedSessionId.get(pid) === sessionId) pidToConfirmedSessionId.delete(pid);
+        const persisted = persistedResumeProcesses.get(pid);
+        if (persisted?.requestedSessionId === sessionId || persisted?.confirmedSessionId === sessionId) {
+          persistedResumeProcesses.delete(pid);
+          persistResumeProcesses();
+        }
+        return;
+      }
+
       if (existingSession && sessionMetadata.capabilities?.concurrentClients) {
         existingSession.sharedSessions ??= {};
-        if (sessionMetadata.lifecycleState === 'archived') {
-          delete existingSession.sharedSessions[sessionId];
-          return;
-        }
         existingSession.sharedSessions[sessionId] = sessionMetadata;
         invalidateVerifiedExit(sessionId);
         // Native /new or /fork cannot replace the primary spawn confirmation.
@@ -1148,7 +1168,26 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     };
 
     spawnSession = createSpawnDeduplicator(spawnSessionOnce);
+    let recoveredRuntimes: Awaited<ReturnType<typeof readRuntimes>> = [];
+    if (persistedResumeProcesses.size > 0) {
+      try { recoveredRuntimes = await readRuntimes({ strict: true }); }
+      catch { /* Uncertain ownership keeps the existing spawn quarantine. */ }
+    }
     for (const [pid, record] of persistedResumeProcesses) {
+      // Older runners retained a primary root's spawn ACK after it closed
+      // while siblings kept the wrapper alive. Recover only proven closures.
+      const closedRoot = recoveredRuntimes.some(runtime =>
+        runtime.pid === pid && runtime.marker === record.processStartMarker
+        && runtime.hub === configuration.apiUrl && runtime.authHash === runtimeAuthHash()
+        && runtime.sessions[record.requestedSessionId]?.active === false
+        && !runtime.pendingCreations?.includes(record.requestedSessionId)
+      );
+      if (closedRoot) {
+        persistedResumeProcesses.delete(pid);
+        pidToRequestedSessionId.delete(pid);
+        pidToConfirmedSessionId.delete(pid);
+        continue;
+      }
       const verified = pidToRequestedSessionId.get(pid) === record.requestedSessionId;
       existingSessionIdByChildPid.set(pid, record.requestedSessionId);
       spawnSession.recoverChild(
@@ -1158,6 +1197,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           : { type: 'error', errorMessage: `Session ${record.requestedSessionId} process verification is pending` }
       );
     }
+    persistResumeProcesses();
 
     // Stop a session by sessionId or PID fallback
     const stopSession = async (

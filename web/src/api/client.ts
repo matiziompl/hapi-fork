@@ -648,6 +648,12 @@ export class ApiClient {
         })
     }
 
+    async closeSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/close`, {
+            method: 'POST', body: JSON.stringify({}),
+        })
+    }
+
     async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {
         return await this.request<ReopenSessionResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/reopen`,

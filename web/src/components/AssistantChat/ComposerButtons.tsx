@@ -396,6 +396,10 @@ function ScratchlistToggleIcon() {
     )
 }
 
+function AgentStatusIcon() {
+    return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19a10 10 0 1 1 16 0Z" /><path d="m12 13 4-4M7 10h.01M12 6h.01M17 14h.01" /></svg>
+}
+
 export function ComposerToolbarItemPreview(props: { item: ComposerToolbarItemId; label: string }) {
     const icon = (() => {
         switch (props.item) {
@@ -408,6 +412,7 @@ export function ComposerToolbarItemPreview(props: { item: ComposerToolbarItemId;
             case 'voiceMic': return <SpeakerIcon />
             case 'scratchlist': return <ScratchlistToggleIcon />
             case 'schedule': return <ScheduleIcon className="h-[18px] w-[18px]" />
+            case 'status': return <AgentStatusIcon />
             case 'model':
             case 'effort':
                 return <><span className="max-w-24 truncate text-xs font-medium">{props.label}</span><ChevronIcon /></>
@@ -776,6 +781,9 @@ export function DictationButton(props: {
 
 export function ComposerButtons(props: {
     canSend: boolean
+    onStatus?: () => void
+    statusPending?: boolean
+    statusDisabled?: boolean
     controlsDisabled: boolean
     showSettingsButton: boolean
     settingsButtonRef?: Ref<HTMLButtonElement>
@@ -949,6 +957,22 @@ export function ComposerButtons(props: {
                         onTerminal={props.onTerminal}
                         disabled={props.terminalDisabled}
                     />
+                ) : null}
+                </ToolbarItemSlot>
+
+                <ToolbarItemSlot item="status">
+                {props.onStatus ? (
+                    <button
+                        type="button"
+                        aria-label={t('settings.chat.composerToolbar.item.status')}
+                        title={t('settings.chat.composerToolbar.item.status')}
+                        aria-busy={props.statusPending || undefined}
+                        onClick={props.onStatus}
+                        disabled={props.statusPending || (props.statusDisabled ?? props.controlsDisabled)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-2 focus-visible:outline-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {props.statusPending ? <LoadingIcon /> : <AgentStatusIcon />}
+                    </button>
                 ) : null}
                 </ToolbarItemSlot>
 

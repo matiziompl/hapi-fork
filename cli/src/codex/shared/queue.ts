@@ -8,7 +8,8 @@ import { isIndeterminateError } from '../codexAppServerClient';
 const InputSchema = z.array(z.object({ type: z.string() }).passthrough());
 export const SubmissionSchema = z.object({ id: z.string(), input: InputSchema, clientUserMessageId: z.string() });
 const LedgerSchema = z.record(z.string(), z.object({
-    input: InputSchema, state: z.enum(['unknown', 'queued', 'consumed', 'canceled', 'rejected', 'released']), nativeId: z.string().optional()
+    input: InputSchema, state: z.enum(['unknown', 'queued', 'consumed', 'canceled', 'rejected', 'released']), nativeId: z.string().optional(),
+    submittedByHapi: z.boolean().optional()
 }));
 export type QueueInput = z.infer<typeof InputSchema>;
 type Entry = z.infer<typeof LedgerSchema>[string];
@@ -115,13 +116,14 @@ export class SharedCodexQueue {
 
     /** Return proven unexecuted input to the hub's existing resume queue.
      * Run only after all frontends stop submitting; no second native drainer. */
-    suspend(): Promise<void> {
+    suspend(onlyOwnedInputs = false): Promise<void> {
         return this.serial(async () => {
             try { await this.reconcileNow(); } catch {
                 // Without a fresh snapshot even the input may have been edited.
                 // Do not delete and later restore stale contents from the ledger.
                 const unknown: string[] = [];
                 for (const [id, entry] of Object.entries(this.entries)) {
+                    if (onlyOwnedInputs && !entry.submittedByHapi) continue;
                     if (entry.state === 'queued') entry.state = 'unknown';
                     if (entry.state === 'unknown') unknown.push(id);
                 }
@@ -129,6 +131,7 @@ export class SharedCodexQueue {
                 return;
             }
             for (const [id, entry] of Object.entries(this.entries)) {
+                if (onlyOwnedInputs && !entry.submittedByHapi) continue;
                 if (!['queued', 'unknown'].includes(entry.state)) continue;
                 // Persist uncertainty before deletion; a lost ACK cannot authorize replay.
                 entry.state = 'unknown'; await this.save();
@@ -174,7 +177,7 @@ export class SharedCodexQueue {
             }
             // Preserve native edits and non-text input when the hub redelivers.
             if (existing?.state === 'released') input = existing.input;
-            const entry: Entry = { state: 'unknown', input };
+            const entry: Entry = { state: 'unknown', input, submittedByHapi: true };
             this.entries[id] = entry; await this.save();
             try {
                 const response = z.object({ queuedSubmission: SubmissionSchema }).parse(await this.client.request('thread/queue/add', {
@@ -238,7 +241,7 @@ export class SharedCodexQueue {
                     if (!response.deleted) { this.uncertain([id]); return { steered: false, indeterminate: true }; }
                 } catch { this.uncertain([id]); return { steered: false, indeterminate: true }; }
             } else if (freshInput) {
-                entry = { input: freshInput, state: 'unknown' }; this.entries[id] = entry; await this.save();
+                entry = { input: freshInput, state: 'unknown', submittedByHapi: true }; this.entries[id] = entry; await this.save();
             } else return { steered: false, error: 'Message not queued' };
             try {
                 await this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId, input: entry.input, clientUserMessageId: id });

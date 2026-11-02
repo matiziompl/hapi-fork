@@ -22,6 +22,7 @@ import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import { cn, encodeBase64 } from '@/lib/utils'
 import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
+import { AgentStatusCard } from '@/components/AssistantChat/AgentStatusCard'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useCodeWrap } from '@/hooks/useCodeWrap'
 import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
@@ -144,6 +145,10 @@ export const MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS = [
 export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex] satisfies NonNullable<MarkdownTextPrimitiveProps['rehypePlugins']>
 export const MARKDOWN_CLASSNAME = 'aui-md happy-chat-text min-w-0 max-w-full break-words text-[var(--app-fg)]'
 export const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
+    'hapi-status': {
+        SyntaxHighlighter: AgentStatusCard,
+        CodeHeader: () => null,
+    },
     mermaid: {
         SyntaxHighlighter: MermaidDiagram,
     },

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { logger } from '@/ui/logger';
 import { JsonLineParser } from '@/utils/jsonLineParser';
+import { killProcessByChildProcess } from '@/utils/process';
 import { PiAgentEventSchema } from './schemas';
 import type { PiAgentEvent, PiRpcCommand } from './types';
 
@@ -111,6 +112,14 @@ export class PiTransport extends JsonLineParser {
         if (!this.process || this.killed) return;
         this.killed = true;
         this.process.kill('SIGTERM');
+    }
+
+    async close(): Promise<void> {
+        if (!this.process || this.exited) return;
+        this.killed = true;
+        if (!await killProcessByChildProcess(this.process)) {
+            throw new Error('Pi process termination was not confirmed');
+        }
     }
 
     protected handleLine(line: string): void {

@@ -60,6 +60,7 @@ import { SortableComposerAttachments } from '@/components/AssistantChat/Sortable
 import { ComposerParkingContext } from '@/components/AssistantChat/composerParkingContext'
 import type { ScratchlistParkResult } from '@/lib/scratchlistAttachmentFlow'
 import { useTranslation } from '@/lib/use-translation'
+import { randomId } from '@/lib/randomId'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
@@ -514,6 +515,26 @@ export function HappyComposer(props: {
     const getCurrentComposerText = useCallback(() => composerTextRef.current, [])
     const setComposerText = useCallback((text: string) => api.composer().setText(text), [api])
     const voiceInput = useVoiceInputPreferences(props.voiceTranscriptionApi ?? null)
+    const [statusRequest, setStatusRequest] = useState<{ sessionId: string; pending: boolean; error?: string } | null>(null)
+    const statusRequestsRef = useRef(new Set<string>())
+    const handleAgentStatus = useCallback(async () => {
+        const target = sessionId
+        const client = props.voiceTranscriptionApi
+        if (!active || !target || !client || statusRequestsRef.current.has(target)) return
+        statusRequestsRef.current.add(target)
+        setStatusRequest({ sessionId: target, pending: true })
+        try {
+            await client.sendMessage(target, '/status', randomId())
+            setStatusRequest(current => current?.sessionId === target ? null : current)
+        } catch (error) {
+            setStatusRequest(current => current?.sessionId === target ? {
+                sessionId: target, pending: false,
+                error: error instanceof Error ? error.message : t('composer.statusFailed'),
+            } : current)
+        } finally {
+            statusRequestsRef.current.delete(target)
+        }
+    }, [active, sessionId, props.voiceTranscriptionApi, t])
     const dictationConfig = useMemo(() => ({
         api: props.voiceTranscriptionApi ?? null,
         provider: voiceInput.provider,
@@ -2372,6 +2393,12 @@ export function HappyComposer(props: {
                         </div>
                     ) : null}
 
+                    {statusRequest && statusRequest.sessionId === sessionId && statusRequest.error ? (
+                        <div role="alert" className="mb-2 px-3 py-2 text-sm text-[var(--app-fg)]">
+                            {t('composer.statusFailed')}: {statusRequest.error}
+                        </div>
+                    ) : null}
+
                     {sendError ? (
                         <div
                             role="alert"
@@ -2506,6 +2533,9 @@ export function HappyComposer(props: {
 
                             <ComposerButtons
                                 canSend={canSend}
+                                onStatus={props.voiceTranscriptionApi && sessionId ? handleAgentStatus : undefined}
+                                statusPending={Boolean(statusRequest && statusRequest.sessionId === sessionId && statusRequest.pending)}
+                                statusDisabled={!active || disabled}
                                 controlsDisabled={controlsDisabled}
                                 showSettingsButton={showSettingsButton}
                                 settingsButtonRef={settingsButtonRef}

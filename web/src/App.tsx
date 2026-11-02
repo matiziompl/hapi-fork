@@ -41,6 +41,7 @@ import { ToastContainer } from '@/components/ToastContainer'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
+import { FORK_VERSION } from '@hapi/protocol/buildInfo'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
@@ -530,7 +531,10 @@ function AppInner() {
                 />
                 <RunnerVersionSkewBanner />
                 <div className="h-full min-h-0 flex flex-col">
-                    <Outlet />
+                    <div className="min-h-0 flex-1"><Outlet /></div>
+                    <footer className="shrink-0 bg-[var(--app-bg)] px-3 py-0.5 text-left font-mono text-[11px] text-[var(--app-hint)]" aria-label="Fork version">
+                        v{FORK_VERSION}
+                    </footer>
                 </div>
                 <ToastContainer />
                 <InstallPrompt />

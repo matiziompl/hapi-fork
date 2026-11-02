@@ -239,7 +239,7 @@ function looksLikeCodeContent(text: string): string | null {
     return null
 }
 
-function inferCodeLanguage(path: string | null, text: string): string | null {
+export function inferCodeLanguage(path: string | null, text: string): string | null {
     return inferCodeLanguageFromPath(path) ?? looksLikeCodeContent(text)
 }
 
@@ -354,7 +354,7 @@ function extractStdoutStderr(result: unknown): { stdout: string | null; stderr: 
     return null
 }
 
-function extractReadFileContent(result: unknown): { filePath: string | null; content: string } | null {
+export function extractReadFileContent(result: unknown): { filePath: string | null; content: string } | null {
     if (!isObject(result)) return null
     const file = isObject(result.file) ? result.file : null
     if (!file) return null
@@ -371,7 +371,7 @@ function extractReadFileContent(result: unknown): { filePath: string | null; con
     return { filePath, content }
 }
 
-function isReadFileToolCall(toolName: string, input: unknown): boolean {
+export function isReadFileToolCall(toolName: string, input: unknown): boolean {
     if (toolName === 'Read' || toolName === 'NotebookRead' || toolName === 'read') return true
 
     const normalizedName = toolName.toLowerCase()
@@ -385,7 +385,7 @@ function isReadFileToolCall(toolName: string, input: unknown): boolean {
     return false
 }
 
-function extractReadPathFromInput(input: unknown): string | null {
+export function extractReadPathFromInput(input: unknown): string | null {
     if (!isObject(input)) return null
 
     const directPath = getInputStringAny(input, ['file_path', 'filePath', 'path', 'name'])

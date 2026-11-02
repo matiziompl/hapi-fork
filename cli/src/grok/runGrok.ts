@@ -65,7 +65,8 @@ export async function runGrok(opts: {
     const lifecycle = createRunnerLifecycle({
         session,
         logTag: 'grok',
-        stopKeepAlive: () => sessionRef.current?.stopKeepAlive()
+        stopKeepAlive: () => sessionRef.current?.stopKeepAlive(),
+        onBeforeClose: () => sessionRef.current?.kill()
     })
     lifecycle.registerProcessHandlers()
     registerKillSessionHandler(session.rpcHandlerManager, lifecycle, session)

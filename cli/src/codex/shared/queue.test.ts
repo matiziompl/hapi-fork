@@ -17,6 +17,24 @@ async function fixture() {
     return { queue, rpc, consumed, uncertain, client, dir };
 }
 describe('shared native queue', () => {
+    it('closes only proven HAPI input after reconciliation and ledger reload', async () => {
+        const { queue, rpc, client, dir, consumed, uncertain } = await fixture();
+        const local = { id: 'own-native', input, clientUserMessageId: 'local' };
+        const foreign = { id: 'foreign-native', input, clientUserMessageId: 'terminal' };
+        rpc.mockResolvedValueOnce({ queuedSubmission: local }); await queue.enqueue('local', input);
+        rpc.mockResolvedValue({ data: [local, foreign] }); await queue.reconcile();
+        const mirror = vi.fn(); const requeued = vi.fn(async () => true);
+        const restarted = new SharedCodexQueue(client, 'thread', join(dir, 'ledger.json'), consumed, uncertain, mirror, requeued);
+        await restarted.load();
+        rpc.mockResolvedValueOnce({ data: [local, foreign] }).mockResolvedValueOnce({ deleted: true });
+        await restarted.suspend(true);
+        expect(rpc.mock.calls.filter(([method]) => method === 'thread/queue/delete')).toEqual([
+            ['thread/queue/delete', { threadId: 'thread', queuedSubmissionId: 'own-native' }],
+        ]);
+        expect(restarted.state('terminal')).toBe('queued');
+        expect(requeued).toHaveBeenCalledWith(['local']);
+        expect(mirror).not.toHaveBeenCalledWith('terminal', input);
+    });
     it('does not restore potentially stale input when the shutdown snapshot is unavailable', async () => {
         const { queue, rpc, uncertain } = await fixture();
         rpc.mockResolvedValueOnce({ queuedSubmission: { id: 'n', input, clientUserMessageId: 'local' } }); await queue.enqueue('local', input);

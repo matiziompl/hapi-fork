@@ -23,6 +23,7 @@ type SessionActionMenuProps = {
     onSyncCodex?: () => void
     onSyncPi?: () => void
     onArchive: () => void
+    onCloseSession?: () => void
     onReopen?: () => void
     reopenDisabledReason?: string
     /** Soft-fail tip when reopen is allowed but chat-store probe could not verify. */
@@ -224,6 +225,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSyncCodex,
         onSyncPi,
         onArchive,
+        onCloseSession,
         onReopen,
         reopenDisabledReason,
         reopenHint,
@@ -421,6 +423,16 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
+                {sessionActive && onCloseSession ? (
+                    <button type="button" role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={() => { onClose(); onCloseSession() }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                            <path d="M12 3v9M6.5 5.5a9 9 0 1 0 11 0" />
+                        </svg>
+                        {t('session.action.close')}
+                    </button>
+                ) : null}
                 {sessionActive ? (
                     <button
                         type="button"

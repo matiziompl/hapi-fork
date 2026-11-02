@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
+import type { ApiClient } from '@/api/client'
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
 
 /**
@@ -126,6 +127,8 @@ vi.mock('@/components/AssistantChat/SortableComposerAttachments', () => ({
 }))
 vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
     ComposerButtons: (props: {
+        onStatus?: () => void
+        statusPending?: boolean
         onSend: () => void
         onSchedule: (pending: PendingSchedule) => void
         onClearSchedule: () => void
@@ -137,6 +140,7 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         onModelValueToggle?: () => void
     }) => (
         <div>
+            {props.onStatus ? <button type="button" onClick={props.onStatus} disabled={props.statusPending}>status</button> : null}
             <button type="button" onClick={props.onExpandedToggle}>
                 {props.expanded ? 'collapse' : 'expand'}
             </button>
@@ -173,6 +177,7 @@ type HarnessControls = {
 
 function ComposerHarness(props: {
     initialText: string
+    statusClient?: ApiClient
     initialSchedule?: PendingSchedule | null
     piRunning?: boolean
     controls: { current: HarnessControls | null }
@@ -242,6 +247,7 @@ function ComposerHarness(props: {
             <HappyComposer
                 key={composerKey}
                 sessionId={composerKey}
+                voiceTranscriptionApi={props.statusClient}
                 disabled={isSending}
                 pendingSchedule={schedule}
                 sendAcceptance={sendAcceptance}
@@ -280,6 +286,36 @@ function renderComposer(
     render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} controls={controls} />)
     return controls
 }
+
+it('requests status without clearing the draft, attachments or pending schedule', async () => {
+    const sendMessage = vi.fn().mockResolvedValue(undefined)
+    const controls = { current: null as HarnessControls | null }
+    render(<ComposerHarness initialText="unfinished prompt" initialSchedule={{ type: 'absolute', ms: 9000 }}
+        statusClient={{ sendMessage } as unknown as ApiClient} controls={controls} />)
+    act(() => controls.current!.addAttachment())
+    fireEvent.click(screen.getByRole('button', { name: 'status' }))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith('composer-a', '/status', expect.any(String)))
+    expect(runtime.snapshot.composer.text).toBe('unfinished prompt')
+    expect(runtime.snapshot.composer.attachments).toHaveLength(1)
+    expect(screen.getByTestId('pending-schedule').textContent).toContain('9000')
+    expect(runtime.sentIntents).toEqual([])
+})
+
+it('can request status over HTTP when crypto.randomUUID is unavailable', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'randomUUID')
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined })
+    try {
+        const sendMessage = vi.fn().mockResolvedValue(undefined)
+        render(<ComposerHarness initialText="unfinished prompt"
+            statusClient={{ sendMessage } as unknown as ApiClient} controls={{ current: null }} />)
+        fireEvent.click(screen.getByRole('button', { name: 'status' }))
+        await waitFor(() => expect(sendMessage).toHaveBeenCalledWith('composer-a', '/status', expect.any(String)))
+        expect(runtime.snapshot.composer.text).toBe('unfinished prompt')
+    } finally {
+        if (descriptor) Object.defineProperty(globalThis.crypto, 'randomUUID', descriptor)
+        else Reflect.deleteProperty(globalThis.crypto, 'randomUUID')
+    }
+})
 
 function fail(
     id: number,

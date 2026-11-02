@@ -255,6 +255,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         session,
         logTag: 'claude',
         stopKeepAlive: () => currentSessionRef.current?.stopKeepAlive(),
+        onBeforeClose: () => currentSessionRef.current?.kill(),
         onAfterClose: () => {
             happyServer.stop();
             currentSessionRef.current?.localPermissionBridge.stop();

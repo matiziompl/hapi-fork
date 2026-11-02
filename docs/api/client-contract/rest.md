@@ -60,6 +60,7 @@ Source: `hub/src/web/routes/sessions.ts`; request schemas in `shared/src/apiType
 | `POST /api/sessions/:id/resume` | `{permissionMode?}` (`ResumeSessionRequestSchema`) | `{type: 'success', sessionId}` |
 | `POST /api/sessions/:id/reopen` | `{}` | `{ok: true, sessionId, resumed: boolean, cursorSessionProtocol?}` (`ReopenSessionResponseSchema`); `422 {error, missing[]}` if metadata is incomplete |
 | `POST /api/sessions/:id/abort` | `{}` | `{ok: true}` (active sessions only) |
+| `POST /api/sessions/:id/close` | `{}` | `{ok: true}` after non-archiving closure (already inactive is idempotent); `409 close_unsupported` for an old CLI, `502 close_failed`, `504 close_unconfirmed`, errors shaped `{error, code}` |
 | `POST /api/sessions/:id/archive` | `{}` | `{ok: true}` or `{ok: true, alreadyArchived: true}`; 409 for a plain inactive session |
 | `DELETE /api/sessions/:id` | — | `{ok: true}`; 409 while active (archive first) |
 | `PATCH /api/sessions/:id` | `{name?, titleLocked?}` (at least one; name: 1–255 chars; lock: boolean) | `{ok: true}` (rename) |
@@ -70,6 +71,20 @@ Source: `hub/src/web/routes/sessions.ts`; request schemas in `shared/src/apiType
 | `POST /api/sessions/:id/title-suggestion` | — | `{title}`; errors pass through 422/429/502/503 |
 | `GET /api/sessions/:id/slash-commands` | — | `SlashCommandsResponse` `{success, commands?, error?}` |
 | `GET /api/sessions/:id/skills` | — | `SkillsResponse`-shaped `{success, ...}` |
+
+Close uses the authenticated session RPC `closeSession`, retaining the transcript
+and uploads. It does not substitute Archive or a machine-wide stop when the
+session's CLI lacks support. An active session must become inactive and report
+`metadata.lifecycleState: 'closed'` before success is returned. In shared Codex,
+this affects only the selected Hub root, retaining other roots and borrowed
+native daemons. It does not archive the native thread.
+
+The fork reserves immediate bare `/status` (and AGY `/quota`, `/usage`) for
+account status without a model turn. The assistant message contains a
+`hapi-status` fenced JSON report, validated by `shared/src/agentStatus.ts`.
+The Web client renders quota bars and formats epoch timestamps in
+`Europe/Warsaw`, in 24-hour time to the minute without a timezone suffix.
+Unknown quotas remain explicit; they are not inferred from token usage.
 
 ::: warning resume / reopen may return a different sessionId
 Both endpoints return the id of the session that now carries the conversation — which **may differ from the id you called them on** (fresh spawn under a new id; the old row is superseded). Clients must migrate composer drafts and replace navigation to the returned id. Reference: `web/src/routes/sessions/followSupersedingSession.ts`; the durable link also appears as `metadata.supersededBySessionId` on the old session.

@@ -4,6 +4,7 @@ export const RPC_METHODS = {
     Switch: 'switch',
     SetSessionConfig: 'set-session-config',
     KillSession: 'killSession',
+    CloseSession: 'closeSession',
     HandoffLocal: 'handoff-local',
     SpawnHappySession: 'spawn-happy-session',
     StopSession: 'stop-session',

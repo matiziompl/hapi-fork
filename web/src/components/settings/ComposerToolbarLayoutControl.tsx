@@ -24,6 +24,7 @@ const ITEM_LABEL_KEYS: Record<ComposerToolbarItemId, string> = {
     voiceMic: 'settings.chat.composerToolbar.item.voiceMic',
     scratchlist: 'settings.chat.composerToolbar.item.scratchlist',
     schedule: 'settings.chat.composerToolbar.item.schedule',
+    status: 'settings.chat.composerToolbar.item.status',
 }
 
 export function ComposerToolbarLayoutControl() {

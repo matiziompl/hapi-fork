@@ -12,6 +12,7 @@ export const COMPOSER_TOOLBAR_ITEM_IDS = [
     'voiceMic',
     'scratchlist',
     'schedule',
+    'status',
 ] as const
 
 export type ComposerToolbarItemId = typeof COMPOSER_TOOLBAR_ITEM_IDS[number]

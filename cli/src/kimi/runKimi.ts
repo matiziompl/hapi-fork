@@ -82,7 +82,8 @@ export async function runKimi(opts: {
     const lifecycle = createRunnerLifecycle({
         session,
         logTag: 'kimi',
-        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive()
+        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive(),
+        onBeforeClose: () => sessionWrapperRef.current?.kill()
     });
 
     lifecycle.registerProcessHandlers();

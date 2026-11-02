@@ -32,6 +32,7 @@ import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
+import { getAgentStatusCommands } from '../../sync/agentStatus'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
@@ -414,6 +415,17 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             }, result.hydrateFailed ? 500 : 409)
         }
         return c.json({ success: true as const })
+    })
+
+    app.post('/sessions/:id/close', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const access = requireSessionFromParam(c, engine)
+        if (access instanceof Response) return access
+        const result = await engine.closeSession(access.sessionId, c.get('namespace'))
+        if (result.type === 'error') return c.json({ error: result.message, code: result.code },
+            result.code === 'close_unsupported' ? 409 : result.code === 'close_unconfirmed' ? 504 : 502)
+        return c.json({ ok: true })
     })
 
     app.post('/sessions/:id/archive', async (c) => {
@@ -1300,8 +1312,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         // Get agent type from session metadata, default to 'claude'
         const agent = sessionResult.session.metadata?.flavor ?? 'claude'
 
-        const metadataCommands = commandsFromMetadataSlashCommands(
-            sessionResult.session.metadata?.slashCommands
+        const metadataCommands = mergeSlashCommands(
+            getAgentStatusCommands(agent),
+            commandsFromMetadataSlashCommands(sessionResult.session.metadata?.slashCommands)
         )
 
         try {

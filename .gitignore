@@ -79,3 +79,10 @@ android/captures/
 # drop in their own) — never commit a real one. The committed placeholder is
 # android/app/google-services.json.example.
 android/app/google-services.json
+
+# Fork deployment state, secrets and local tooling
+/data/
+/.tools/
+.env
+.env.*
+!.env.example

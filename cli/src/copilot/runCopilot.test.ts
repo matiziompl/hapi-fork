@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CopilotSession } from './session';
+// These exported configuration helpers do not start an interactive launcher.
+vi.mock('./loop', () => ({ copilotLoop: vi.fn() }));
 import { applyCopilotSlashAgentMode, resolveCopilotQueueModel } from './runCopilot';
 
 describe('applyCopilotSlashAgentMode', () => {

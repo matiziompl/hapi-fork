@@ -30,6 +30,7 @@ import { isUserInputMessage } from '../store/sessionUserActivity'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
+import { AgentStatusService, isAgentStatusCommand } from './agentStatus'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
 import { buildForkSessionSummary } from './forkSessionSummary'
@@ -191,6 +192,7 @@ export class SyncEngine {
     private readonly sessionCache: SessionCache
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
+    private readonly agentStatusService: AgentStatusService
     private readonly titleSuggestionService: TitleSuggestionService
     private readonly automaticTitleSuggestionService: AutomaticTitleSuggestionService
     /** Completed turns whose final chat message may still be in transit. */
@@ -282,6 +284,8 @@ export class SyncEngine {
             this.titleSuggestionService
         )
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.agentStatusService = new AgentStatusService(store, this.eventPublisher,
+            (sessionId, flavor) => this.rpcGateway.getAgentStatus(sessionId, flavor))
         this.sessionCache.closeTurnsLeftOpen()
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
@@ -1188,6 +1192,12 @@ export class SyncEngine {
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
         }
+        const session = this.sessionCache.getSession(sessionId)
+        if (session?.active && payload.scheduledAt == null && !payload.attachments?.length
+            && isAgentStatusCommand(payload.text, session.metadata?.flavor)) {
+            await this.agentStatusService.send(session, payload)
+            return
+        }
         if (!this.sessionCache.getSession(sessionId)?.thinking) {
             this.automaticTitleSuggestionService.onTurnStarted(sessionId)
         }
@@ -1865,6 +1875,27 @@ export class SyncEngine {
                 hydrateFailed: true
             }
         }
+    }
+
+    async closeSession(sessionId: string, namespace: string): Promise<
+        { type: 'success' } | { type: 'error'; code: string; message: string }
+    > {
+        const access = this.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return { type: 'error', code: 'close_failed', message: 'Session unavailable' }
+        if (!access.session.active) return { type: 'success' }
+        try {
+            await this.rpcGateway.closeSession(access.sessionId)
+        } catch (error) {
+            return { type: 'error', code: error instanceof RpcTargetMissingError ? 'close_unsupported' : 'close_failed',
+                message: error instanceof RpcTargetMissingError
+                    ? 'Close without archiving is unavailable. Update the HAPI CLI on the session machine and reopen the session.'
+                    : error instanceof Error ? error.message : 'Session close failed' }
+        }
+        if (!await this.waitForSessionInactive(access.sessionId, 15_000, 'closed')) {
+            return { type: 'error', code: 'close_unconfirmed', message: 'Could not confirm session closure. Check its state before retrying.' }
+        }
+        this.releaseSessionEnumerations(access.sessionId)
+        return { type: 'success' }
     }
 
     async archiveSession(sessionId: string): Promise<void> {
@@ -3263,6 +3294,27 @@ export class SyncEngine {
         }
     }
 
+    private findActiveCodexThread(session: Session, threadId: string, ownerId?: string): ResumeSessionResult | null {
+        const metadata = session.metadata
+        if (!metadata?.machineId || !metadata.path) return null
+        const matches = this.sessionCache.getActiveSessions().filter((candidate) =>
+            candidate.id !== session.id
+            && candidate.namespace === session.namespace
+            && candidate.metadata?.flavor === 'codex'
+            && candidate.metadata.codexSessionId === threadId
+            && candidate.metadata.machineId === metadata.machineId
+            && candidate.metadata.path === metadata.path
+            && candidate.metadata.lifecycleState !== 'archived'
+        )
+        if (matches.length > 1) {
+            return { type: 'error', code: 'resume_unavailable', message: 'Multiple active Codex sessions own this thread. Select the active conversation before retrying.' }
+        }
+        if (matches.length === 1 && (!ownerId || matches[0].id === ownerId)) {
+            return { type: 'success', sessionId: matches[0].id }
+        }
+        return null
+    }
+
     async resumeSession(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
@@ -3343,6 +3395,14 @@ export class SyncEngine {
         }
 
         const metadata = session.metadata!
+
+        // A native thread can be attached to another Hub row already. Reuse
+        // that live conversation; spawning a second runtime violates Codex's
+        // ownership lock. Never merge/delete either row or cross machines.
+        if (flavor === 'codex' && resumeToken) {
+            const activeThread = this.findActiveCodexThread(session, resumeToken)
+            if (activeThread) return activeThread
+        }
 
         const targetMachine = this.resolveOnlineMachineForSession(
             session,
@@ -3485,6 +3545,34 @@ export class SyncEngine {
             )
 
             if (spawnResult.type !== 'success') {
+                const codexOwner = flavor === 'codex' && resumeToken
+                    ? spawnResult.message.match(/Thread belongs to another Codex runtime\. Use hapi resume ([\w-]+)\./)
+                    : null
+                const nativeWriter = flavor === 'codex' && resumeToken
+                    && spawnResult.message.includes(`thread ${resumeToken} already has an active writer`)
+                if ((codexOwner || nativeWriter) && resumeToken) {
+                    const activeThread = this.findActiveCodexThread(session, resumeToken, codexOwner?.[1])
+                    if (activeThread?.type === 'success') {
+                        // Spawn may race an owner reconnect. Undo only our
+                        // archive clear; the existing runtime remains intact.
+                        const current = this.sessionCache.getSessionByNamespace(access.sessionId, namespace)
+                        if (metadata.lifecycleState === 'archived' && !current?.active) {
+                            await this.sessionCache.restoreSessionArchiveMetadata(access.sessionId, {
+                                lifecycleState: metadata.lifecycleState,
+                                lifecycleStateSince: metadata.lifecycleStateSince,
+                                archivedBy: metadata.archivedBy,
+                                archiveReason: metadata.archiveReason,
+                            })
+                        }
+                        return activeThread
+                    }
+                    return activeThread ?? {
+                        type: 'error', code: 'resume_unavailable',
+                        message: nativeWriter
+                            ? 'This Codex thread already has an active writer. The Runner must attach to the existing local Codex server instead of starting another writer. Update the Runner adapter and retry; the existing conversation has been left running.'
+                            : 'This Codex thread belongs to another runtime, but its active conversation is unavailable to this Hub. Reconnect the owning runtime and retry. No duplicate runtime was started.',
+                    }
+                }
                 if (requiresPiNativeReady) {
                     const stopped = await this.terminateInPlacePiResume(
                         targetMachine.id,
@@ -4365,11 +4453,11 @@ export class SyncEngine {
         return 'timeout'
     }
 
-    async waitForSessionInactive(sessionId: string, timeoutMs: number = 15_000): Promise<boolean> {
+    async waitForSessionInactive(sessionId: string, timeoutMs: number = 15_000, lifecycleState?: string): Promise<boolean> {
         const start = Date.now()
         while (Date.now() - start < timeoutMs) {
             const session = this.getSession(sessionId)
-            if (!session?.active) {
+            if (!session?.active && (!lifecycleState || session?.metadata?.lifecycleState === lifecycleState)) {
                 return true
             }
             await new Promise((resolve) => setTimeout(resolve, 250))

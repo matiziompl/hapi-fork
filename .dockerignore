@@ -1,0 +1,17 @@
+data/
+.git/
+.tools/
+**/node_modules/
+**/dist/
+**/dist-exe/
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+**/*.log
+**/coverage/
+playwright-report/
+test-results/
+.idea/
+.vscode/
+# Generated afresh from this build's frontend.
+hub/src/web/embeddedAssets.generated.ts

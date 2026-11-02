@@ -321,7 +321,12 @@ the prompt is loaded by DSH through its own `skill` tool and catalog.
 
   Requires an agy CLI with `--input-format stream-json` support. Native CLI
   commands such as `/model` and `/usage` cannot run inside this stream; use
-  HAPI's model and effort controls to change settings. Remote-only — there is
+  HAPI's model and effort controls to change settings. In this fork the Hub
+  handles immediate `/status`, `/quota` and `/usage` separately, using the native
+  one-shot usage command and displaying its account limits in chat. The composer
+  **Status and limits** button does the same and can be hidden in the Chat
+  settings toolbar editor. Node.js and an agy version supporting structured
+  print-mode usage are required on the session machine. Remote-only — there is
   no local terminal input path or PTY/TUI wrapper.
 
   Permission handling uses agy's `settings.json` allow/deny rules

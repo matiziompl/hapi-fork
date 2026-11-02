@@ -44,6 +44,21 @@ beforeEach(() => {
     platformState.isTelegram = false
 })
 
+it('offers closing an active session as a separate action from archive', () => {
+    const close = vi.fn()
+    const archive = vi.fn()
+    const { props } = renderMenu({ sessionActive: true, onCloseSession: close, onArchive: archive })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close session' }))
+    expect(close).toHaveBeenCalledOnce()
+    expect(archive).not.toHaveBeenCalled()
+    expect(props.onClose).toHaveBeenCalledOnce()
+})
+
+it('does not offer closing a session that is already inactive', () => {
+    renderMenu({ sessionActive: false, onCloseSession: vi.fn() })
+    expect(screen.queryByRole('menuitem', { name: 'Close session' })).toBeNull()
+})
+
 describe('SessionActionMenu - Pin action', () => {
     it('renders project and global pin actions', () => {
         const onSetPinMode = vi.fn()

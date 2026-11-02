@@ -17,6 +17,7 @@ function safeJsonParse(value: string): unknown {
 
 export class RpcHandlerManager {
     private handlers: RpcHandlerMap = new Map()
+    private handlerObservers = new Map<string, Set<(handler: RpcHandler) => void>>()
     private readonly scopePrefix: string
     private readonly logger: (message: string, data?: any) => void
     private socket: Socket | null = null
@@ -33,6 +34,7 @@ export class RpcHandlerManager {
         const prefixedMethod = this.getPrefixedMethod(method)
 
         this.handlers.set(prefixedMethod, handler)
+        for (const observer of this.handlerObservers.get(prefixedMethod) ?? []) observer(handler)
 
         if (this.socket) {
             this.socket.emit('rpc-register', { method: prefixedMethod })
@@ -79,6 +81,18 @@ export class RpcHandlerManager {
     hasHandler(method: string): boolean {
         const prefixedMethod = this.getPrefixedMethod(method)
         return this.handlers.has(prefixedMethod)
+    }
+
+    /** Observe future registrations, excluding controls left by an old launcher. */
+    onHandlerRegistered(method: string, observer: (handler: RpcHandler) => void): () => void {
+        const key = this.getPrefixedMethod(method)
+        const observers = this.handlerObservers.get(key) ?? new Set()
+        this.handlerObservers.set(key, observers)
+        observers.add(observer)
+        return () => {
+            observers.delete(observer)
+            if (!observers.size) this.handlerObservers.delete(key)
+        }
     }
 
     clearHandlers(): void {

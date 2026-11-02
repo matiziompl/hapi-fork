@@ -3,6 +3,24 @@
 @config "../tailwind.config.ts";
 
 :root {
+    /* Codex CLI status surface stays legible in both app themes. */
+    --agent-status-bg: #282b32;
+    --agent-status-fg: #e4e7ec;
+    --agent-status-muted: #aab1bd;
+    --agent-status-border: #50555f;
+    --agent-status-fill: #dfe4ed;
+    --agent-status-warning: #ffd482;
+    /* Downloadeusz-inspired terminal palette, independent of the app theme. */
+    --terminal-bg: #000000;
+    --terminal-fg: #86efac;
+    --terminal-cursor: #4ade80;
+    --terminal-selection-bg: #14532d;
+    --terminal-selection-fg: #dcfce7;
+    --terminal-heading-bg: #101210;
+    --terminal-heading-fg: #bbf7d0;
+    --terminal-border: #27272a;
+    --terminal-scrollbar: #3f4b41;
+    --terminal-scrollbar-hover: #627568;
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
     --app-hint: var(--tg-theme-hint-color, #6b7280);
@@ -840,3 +858,29 @@ html[data-theme="oled"] .shiki span:not([data-line-number]) {
     transition: none;
   }
 }
+
+/* Interactive terminals keep the Downloadeusz console surface in both app themes. */
+.hapi-terminal-frame {
+    overflow: hidden;
+    border: 1px solid var(--terminal-border);
+    border-radius: 16px;
+    background: var(--terminal-bg);
+}
+
+.hapi-terminal-heading {
+    border-bottom: 1px solid var(--terminal-border);
+    background: var(--terminal-heading-bg);
+}
+
+.hapi-terminal,
+.hapi-terminal .xterm-viewport {
+    background: var(--terminal-bg);
+    color-scheme: dark;
+    scrollbar-color: var(--terminal-scrollbar) var(--terminal-bg);
+    scrollbar-width: thin;
+}
+
+.hapi-terminal .xterm-viewport::-webkit-scrollbar { width: 6px; }
+.hapi-terminal .xterm-viewport::-webkit-scrollbar-track { background: var(--terminal-bg); }
+.hapi-terminal .xterm-viewport::-webkit-scrollbar-thumb { background: var(--terminal-scrollbar); border-radius: 4px; }
+.hapi-terminal .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--terminal-scrollbar-hover); }

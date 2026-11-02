@@ -111,6 +111,24 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
     };
 }
 
+it('routes explicit close to non-archiving cleanup of this root only', async () => {
+    const end = vi.fn(async () => {})
+    const f = await fixture({ end })
+    await f.root.activate()
+    expect(f.rpc.get('closeSession')).toBeDefined()
+    await f.rpc.get('closeSession')?.({})
+    expect(end).toHaveBeenCalledWith(f.root, false, false)
+})
+
+it('completes close RPC while draining ordinary controls without waiting on itself', async () => {
+    const f = await fixture({ end: async root => { await root.prepareClose() } })
+    await f.root.activate()
+    await expect(Promise.race([
+        f.rpc.get(RPC_METHODS.CloseSession)!({}),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('close deadlocked')), 300)),
+    ])).resolves.toEqual({ success: true })
+})
+
 async function startCompaction(f: Awaited<ReturnType<typeof fixture>>, id = 'input', turnId = 'compacting-turn') {
     f.native.queue = [{ id: `native-${id}`, clientUserMessageId: id, input: [{ type: 'text', text: id }] }];
     await f.root.refresh();
@@ -562,4 +580,36 @@ describe('shared steering availability', () => {
         await f.root.activate();
         await vi.waitFor(() => expect(end).toHaveBeenCalledTimes(1));
     });
+    it('detaches from a borrowed server without removing native queued input', async () => {
+        const f = await fixture();
+        const foreignInput = { id: 'native-queued', clientUserMessageId: 'native-user', input: [{ type: 'text', text: 'keep pending' }] };
+        f.native.queue = [foreignInput];
+        const original = f.root.client.request.bind(f.root.client);
+        const request = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params: any) => {
+            if (method === 'thread/queue/delete') {
+                f.native.queue = f.native.queue.filter(item => item.id !== params.queuedSubmissionId);
+                return { deleted: true } as any;
+            }
+            return original(method, params) as any;
+        });
+        await f.root.refresh();
+        request.mockClear();
+        await f.root.suspend(false);
+        expect(f.native.queue).toEqual([foreignInput]);
+        expect(request.mock.calls.some(([method]) => method === 'thread/queue/delete')).toBe(false);
+    });
+
+    it('preserves uploads when archiving only the Hub view of a borrowed thread', async () => {
+        const f = await fixture();
+        const death = vi.spyOn(f.root.session, 'sendSessionDeath');
+        await f.root.close(true, true);
+        expect(death).toHaveBeenCalledWith(undefined, { preserveUploads: true });
+    });
+    it('keeps upload cleanup when archiving a privately owned thread', async () => {
+        const f = await fixture();
+        const death = vi.spyOn(f.root.session, 'sendSessionDeath');
+        await f.root.close(true);
+        expect(death).toHaveBeenCalledWith(undefined, { preserveUploads: false });
+    });
+
 });

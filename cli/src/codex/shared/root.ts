@@ -29,7 +29,7 @@ export type RootHost = {
     directory: string; generation: string; endpoint: string; token?: string;
     settingsFor(threadId: string): Record<string, unknown> | undefined;
     create(method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot): Promise<SharedCodexRoot>;
-    end(root: SharedCodexRoot, nativeArchive?: boolean): Promise<void>;
+    end(root: SharedCodexRoot, nativeArchive?: boolean, archiveHub?: boolean): Promise<void>;
 };
 const SettingsSchema = z.object({
     permissionMode: z.enum(['default', 'read-only', 'autoReview', 'yolo']).optional(),
@@ -523,6 +523,10 @@ export class SharedCodexRoot {
             if (turnId) await this.client.request('turn/interrupt', { threadId: this.threadId, turnId });
         });
         rpc.registerHandler(RPC_METHODS.KillSession, async () => { await this.host.end(this); return { success: true }; });
+        // A terminal control drains the other controls, so it must not join them.
+        this.session.rpcHandlerManager.registerHandler(RPC_METHODS.CloseSession, async () => {
+            await this.host.end(this, false, false); return { success: true };
+        });
         // #1911 C2 / AC6: Codex owns KillSession here and never calls
         // registerKillSessionHandler — still must EXIT on hub-archived metadata
         // (KillSession unreachable / map-miss). Latch covers bootstrap write
@@ -627,21 +631,37 @@ export class SharedCodexRoot {
         this.publishPlan();
         this.session.onReconnect(null); this.client.setTransportAbandonedHandler(null);
     }
-    async suspend(): Promise<void> {
+    async suspend(releaseQueuedInputs = true, onlyOwnedInputs = false): Promise<void> {
         this.stopAccepting();
         await this.work.catch(() => {}); await Promise.allSettled([...this.controls]);
-        await this.queue?.suspend();
+        // A borrowed daemon keeps executing after HAPI detaches. Its native
+        // queue (including inputs from other clients) must remain untouched.
+        if (releaseQueuedInputs) await this.queue?.suspend(onlyOwnedInputs);
+        else await this.queue?.flush();
         // Capture any dequeue/turn that won the race with native deletion.
         if (this.threadId && this.client.isInitialized()) await this.refresh();
     }
-    close(archived: boolean): Promise<void> {
+    async prepareClose(): Promise<void> {
+        // Only release inputs owned by this HAPI root; preserve other clients' work.
+        await this.suspend(true, true);
+        const turnId = this.currentTurn;
+        if (turnId) {
+            try { await this.client.request('turn/interrupt', { threadId: this.threadId, turnId }); }
+            catch (error) { await this.refresh(); if (this.currentTurn) throw error; }
+        }
+    }
+    close(archived: boolean, preserveUploads = !archived, explicitlyClosed = false): Promise<void> {
         return this.closing ??= (async () => {
             this.stopAccepting(); this.closed = true; clearInterval(this.heartbeat);
             this.permissions?.close();
             await this.client.disconnect(); await this.notifications; await this.queue?.flush(); this.bridge?.server.stop();
             if (archived) this.session.updateMetadata(metadata => ({ ...metadata, lifecycleState: 'archived', lifecycleStateSince: Date.now() }));
-            // Inactive is resumable; uploads referenced by pending input must survive.
-            this.session.sendSessionDeath(undefined, { preserveUploads: !archived });
+            else if (explicitlyClosed) this.session.updateMetadata(metadata => {
+                const { archivedBy, archiveReason, ...rest } = metadata;
+                return { ...rest, lifecycleState: 'closed', lifecycleStateSince: Date.now() };
+            });
+            // Pending native input may outlive the Hub view or its wrapper.
+            this.session.sendSessionDeath(undefined, { preserveUploads });
             await this.session.flush(); this.session.close();
         })();
     }

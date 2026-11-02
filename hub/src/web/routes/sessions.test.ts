@@ -1418,7 +1418,7 @@ describe('sessions routes', () => {
             commands: [
                 { name: 'help', source: 'builtin' },
                 { name: 'memory', source: 'builtin' },
-                { name: 'status', source: 'builtin' }
+                { name: 'status', description: 'Show session status and available account limits', source: 'builtin' }
             ]
         })
     })
@@ -1576,6 +1576,7 @@ describe('sessions routes', () => {
             commands: [
                 { name: 'help', source: 'builtin' },
                 { name: 'memory', source: 'builtin' },
+                { name: 'status', description: 'Show session status and available account limits', source: 'builtin' },
                 { name: 'clear', source: 'builtin' },
                 { name: 'project-only', source: 'project', content: 'Project prompt' }
             ]

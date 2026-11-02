@@ -10,8 +10,8 @@
  *   done, any work.
  * - `metadata.lifecycleState` — **agent** liveness. `running` while the
  *   session is a live working session, `idle` once the hub has observed
- *   keepalives with no agent progress for the configured window, `archived`
- *   once the session is closed.
+ *   keepalives with no agent progress for the configured window, `closed`
+ *   after an explicit non-archiving close, or `archived` after archival.
  *
  * `idle` is a reversible, non-destructive marker: the session stays `active`
  * (its CLI really is reachable and a turn would be served immediately), it is

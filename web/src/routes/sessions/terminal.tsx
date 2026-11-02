@@ -653,14 +653,26 @@ export default function TerminalPage() {
             ) : null}
 
             <div className="flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
-                <div className="mx-auto h-full w-full max-w-content px-2 py-2 sm:p-3">
+                <div className="mx-auto h-full w-full max-w-content p-2 sm:p-3">
                     {terminalSupported ? (
-                        <TerminalView
-                            onMount={handleTerminalMount}
-                            onResize={handleResize}
-                            disableStdin={compactControls && inputMode === 'command'}
-                            className="h-full w-full"
-                        />
+                        <div className="hapi-terminal-frame flex h-full min-h-0 flex-col">
+                            <div className="hapi-terminal-heading flex shrink-0 items-center justify-between px-4 py-2">
+                                <span className="font-mono text-xs text-[var(--terminal-heading-fg)]">Terminal</span>
+                                <div aria-hidden="true" className="flex gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-red-400/60" />
+                                    <span className="h-2.5 w-2.5 rounded-full bg-amber-300/60" />
+                                    <span className="h-2.5 w-2.5 rounded-full bg-green-400/60" />
+                                </div>
+                            </div>
+                            <div className="min-h-0 flex-1 p-3">
+                                <TerminalView
+                                    onMount={handleTerminalMount}
+                                    onResize={handleResize}
+                                    disableStdin={compactControls && inputMode === 'command'}
+                                    className="h-full w-full"
+                                />
+                            </div>
+                        </div>
                     ) : (
                         <div className="flex h-full items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-4 text-sm text-[var(--app-hint)]">
                             {t('terminal.unsupportedWindows')}

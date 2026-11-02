@@ -2,17 +2,10 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { getTerminalTheme } from '@/lib/terminalTheme'
 import { useAgentTerminalSocket } from '@/hooks/useAgentTerminalSocket'
 import { useQuickKeyInput, QuickKeyRows } from '@/components/QuickKeys/QuickKeys'
 import { useAppContext } from '@/lib/app-context'
-
-function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
-    const styles = getComputedStyle(document.documentElement)
-    const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
-    const foreground = styles.getPropertyValue('--app-fg').trim() || '#ffffff'
-    const selectionBackground = styles.getPropertyValue('--app-subtle-bg').trim() || 'rgba(255, 255, 255, 0.2)'
-    return { background, foreground, selectionBackground }
-}
 
 type AgentTerminalViewProps = {
     sessionId: string
@@ -72,17 +65,11 @@ export function AgentTerminalView(props: AgentTerminalViewProps) {
         if (!container) return
 
         const abortController = new AbortController()
-        const { background, foreground, selectionBackground } = resolveThemeColors()
 
         const terminal = new Terminal({
             cursorBlink: true,
             fontSize: 13,
-            theme: {
-                background,
-                foreground,
-                cursor: foreground,
-                selectionBackground,
-            },
+            theme: getTerminalTheme(),
             convertEol: true,
             customGlyphs: true,
             cols: 80,
@@ -161,10 +148,10 @@ export function AgentTerminalView(props: AgentTerminalViewProps) {
                 : 'bg-[var(--app-hint)]'
 
     return (
-        <div className={`flex flex-col min-h-0 ${className ?? ''}`}>
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--app-border)] bg-[var(--app-secondary-bg)]">
+        <div className={`hapi-terminal-frame flex flex-col min-h-0 ${className ?? ''}`}>
+            <div className="hapi-terminal-heading flex items-center gap-2 px-3 py-2">
                 <span className={`h-2 w-2 rounded-full ${statusColor}`} />
-                <span className="text-xs text-[var(--app-hint)]">
+                <span className="text-xs text-[var(--terminal-heading-fg)]">
                     {state.status === 'connected' ? 'Agent terminal connected' :
                      state.status === 'connecting' ? 'Connecting...' :
                      state.status === 'error' ? `Error: ${state.error}` :
@@ -172,9 +159,9 @@ export function AgentTerminalView(props: AgentTerminalViewProps) {
                 </span>
             </div>
 
-            <div ref={containerRef} className="flex-1 min-h-0 p-2 bg-[var(--app-bg)]" />
+            <div ref={containerRef} className="hapi-terminal flex-1 min-h-0 p-3" />
 
-            <div className="flex flex-col gap-1 px-2 pb-2 pt-1">
+            <div className="flex flex-col gap-1 bg-[var(--app-bg)] px-2 pb-2 pt-1">
                 <QuickKeyRows
                     ctrlActive={ctrlActive}
                     altActive={altActive}

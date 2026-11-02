@@ -114,6 +114,7 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
     private abortController = new AbortController();
     private displayPermissionMode: string | null = null;
     private consecutiveTransientFailures = 0;
+    private processStop: Promise<void> | null = null;
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -243,6 +244,8 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
                     messageBuffer.addMessage(errMsg, 'status');
                 }
             } catch (error) {
+                // A failed stop cannot authorize another turn or a closed session.
+                if (this.processStop) await this.processStop;
                 this.consecutiveTransientFailures = 0;
                 logger.warn('[cursor-remote] Agent run failed', error);
                 const errMsg = error instanceof Error ? error.message : String(error);
@@ -278,8 +281,14 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
             let stderrCapture = '';
 
             const abortHandler = () => {
-                killProcessByChildProcess(child, false).catch(() => {});
-                resolve({ exitCode: null, stderr: stderrCapture });
+                this.processStop = (async () => {
+                    if (!await killProcessByChildProcess(child, false)) {
+                        throw new Error('Cursor process termination was not confirmed');
+                    }
+                })();
+                void this.processStop.then(() => {
+                    cleanup(); resolve({ exitCode: null, stderr: stderrCapture });
+                }, reject);
             };
             this.abortController.signal.addEventListener('abort', abortHandler);
 
@@ -299,7 +308,10 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
             // dropped message.
             child.on('close', (code, signal) => {
                 cleanup();
-                resolve({ exitCode: code, stderr: stderrCapture });
+                // The root can exit before its descendants. Keep the process-tree
+                // verification barrier even after stdio closes during an abort.
+                if (this.processStop) void this.processStop.then(() => resolve({ exitCode: code, stderr: stderrCapture }), reject);
+                else resolve({ exitCode: code, stderr: stderrCapture });
             });
 
             const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -410,6 +422,7 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
     protected async cleanup(): Promise<void> {
         this.clearAbortHandlers(this.session.client.rpcHandlerManager);
         this.abortController.abort();
+        await this.processStop;
     }
 
     private async handleAbort(): Promise<void> {

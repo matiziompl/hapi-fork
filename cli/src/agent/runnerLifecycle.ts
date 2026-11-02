@@ -2,6 +2,7 @@ import type { ApiSessionClient } from '@/api/apiSession'
 import type { SessionEndReason } from '@hapi/protocol'
 import { logger } from '@/ui/logger'
 import { restoreTerminalState } from '@/ui/terminalState'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 
 type RunnerLifecycleOptions = {
     session: ApiSessionClient
@@ -52,19 +53,29 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
     let cleanupPromise: Promise<void> | null = null
     let confirmedCleanupPrepared = false
     let confirmedCleanupComplete = false
+    let archiveOnClose = true
 
     const logPrefix = `[${options.logTag}]`
 
-    const archiveAndClose = async () => {
-        options.session.updateMetadata((currentMetadata) => ({
+    const writeClosedMetadata = () => options.session.updateMetadata((currentMetadata) => {
+        if (!archiveOnClose) {
+            const { archivedBy, archiveReason, ...metadata } = currentMetadata
+            return { ...metadata, lifecycleState: 'closed', lifecycleStateSince: Date.now() }
+        }
+        return {
             ...currentMetadata,
             lifecycleState: 'archived',
             lifecycleStateSince: Date.now(),
             archivedBy: 'cli',
             archiveReason
-        }))
+        }
+    })
 
-        options.session.sendSessionDeath(sessionEndReason)
+    const archiveAndClose = async () => {
+        writeClosedMetadata()
+
+        if (archiveOnClose) options.session.sendSessionDeath(sessionEndReason)
+        else options.session.sendSessionDeath(sessionEndReason, { preserveUploads: true })
         await options.session.flush({ timeoutMs: 1_000 })
         await options.session.close()
     }
@@ -106,14 +117,9 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
             restoreTerminalState()
             options.stopKeepAlive?.()
             await options.onBeforeClose?.()
-            options.session.updateMetadata((currentMetadata) => ({
-                ...currentMetadata,
-                lifecycleState: 'archived',
-                lifecycleStateSince: Date.now(),
-                archivedBy: 'cli',
-                archiveReason
-            }))
-            options.session.sendSessionDeath(sessionEndReason)
+            writeClosedMetadata()
+            if (archiveOnClose) options.session.sendSessionDeath(sessionEndReason)
+            else options.session.sendSessionDeath(sessionEndReason, { preserveUploads: true })
             confirmedCleanupPrepared = true
         }
 
@@ -181,6 +187,15 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
     }
 
     const registerProcessHandlers = () => {
+        options.session.rpcHandlerManager.registerHandler(RPC_METHODS.CloseSession, () => {
+            if (!archiveOnClose) return { success: true }
+            if (cleanupStarted) throw new Error('Session cleanup has already started')
+            archiveOnClose = false
+            setSessionEndReason('terminated')
+            // Let the RPC acknowledgement leave before disconnecting the session.
+            setImmediate(() => { void cleanupAndExit(0) })
+            return { success: true }
+        })
         // tiann/hapi#914: SIGTERM is treated as the default reason ('Hub restart')
         // because the runner is restarted by systemd as part of hub restart in
         // production. If a future code path needs to distinguish "operator

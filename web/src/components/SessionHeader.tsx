@@ -9,6 +9,7 @@ import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
+import { CloseSessionDialog } from '@/components/CloseSessionDialog'
 import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
 import { useScratchlistCount } from '@/lib/use-scratchlist-count'
 import { formatReopenError } from '@/lib/reopenError'
@@ -226,11 +227,12 @@ export function SessionHeader(props: {
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [closeOpen, setCloseOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending: isActionPending } = useSessionActions(
+    const { archiveSession, closeSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending: isActionPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -540,6 +542,7 @@ export function SessionHeader(props: {
                 onSyncCodex={api && codexSessionId && !session.active ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
                 onArchive={() => setArchiveOpen(true)}
+                onCloseSession={api ? () => setCloseOpen(true) : undefined}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
@@ -581,6 +584,8 @@ export function SessionHeader(props: {
                 api={api}
             />
 
+            <CloseSessionDialog isOpen={closeOpen} onClose={() => setCloseOpen(false)}
+                sessionId={session.id} sessionName={title} onConfirm={closeSession} isPending={isPending} />
             <ArchiveSessionDialog
                 isOpen={archiveOpen}
                 onClose={() => setArchiveOpen(false)}

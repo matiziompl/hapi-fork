@@ -4,16 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
+import { getTerminalTheme } from '@/lib/terminalTheme'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 import { getInitialTerminalFontSize } from '@/hooks/useTerminalFontSize'
-
-function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
-    const styles = getComputedStyle(document.documentElement)
-    const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
-    const foreground = styles.getPropertyValue('--app-fg').trim() || '#ffffff'
-    const selectionBackground = styles.getPropertyValue('--app-subtle-bg').trim() || 'rgba(255, 255, 255, 0.2)'
-    return { background, foreground, selectionBackground }
-}
 
 export function TerminalView(props: {
     onMount?: (terminal: Terminal) => void
@@ -51,18 +44,12 @@ export function TerminalView(props: {
 
         const fontProvider = getFontProvider()
         const fontSize = getInitialTerminalFontSize()
-        const { background, foreground, selectionBackground } = resolveThemeColors()
         const terminal = new Terminal({
             cursorBlink: true,
             disableStdin: props.disableStdin ?? false,
             fontFamily: fontProvider.getFontFamily(),
             fontSize,
-            theme: {
-                background,
-                foreground,
-                cursor: foreground,
-                selectionBackground
-            },
+            theme: getTerminalTheme(),
             convertEol: true,
             customGlyphs: true
         })
@@ -137,7 +124,7 @@ export function TerminalView(props: {
     return (
         <div
             ref={containerRef}
-            className={`h-full w-full ${props.className ?? ''}`}
+            className={`hapi-terminal h-full w-full ${props.className ?? ''}`}
         />
     )
 }

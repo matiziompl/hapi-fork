@@ -19,6 +19,7 @@ import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
+import { CloseSessionDialog } from '@/components/CloseSessionDialog'
 import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
 import { CopyIcon, CheckIcon, MarkAllReadIcon } from '@/components/icons'
 
@@ -1146,6 +1147,7 @@ const SessionItem = memo(function SessionItem(props: {
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [closeOpen, setCloseOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const {
         status: cursorChatStoreStatus,
@@ -1172,14 +1174,14 @@ const SessionItem = memo(function SessionItem(props: {
         ? t('session.action.reopenCursorUnverified')
         : undefined
 
-    const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
+    const { archiveSession, closeSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
     const holdPanel = useContext(CollapsiblePanelHoldContext)
-    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || reopenError !== null
+    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || closeOpen || deleteOpen || reopenError !== null
     useEffect(() => {
         if (!overlayOpen || !holdPanel) return
         holdPanel(true)
@@ -1287,6 +1289,7 @@ const SessionItem = memo(function SessionItem(props: {
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.updatedAt)}
                 onArchive={() => setArchiveOpen(true)}
+                onCloseSession={api ? () => setCloseOpen(true) : undefined}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
                 reopenHint={cursorReopenUnverifiedHint}
@@ -1331,6 +1334,8 @@ const SessionItem = memo(function SessionItem(props: {
                 />
             ) : null}
 
+            {closeOpen ? <CloseSessionDialog isOpen onClose={() => setCloseOpen(false)}
+                sessionId={s.id} sessionName={sessionName} onConfirm={closeSession} isPending={isPending} /> : null}
             {archiveOpen ? (
                 <ArchiveSessionDialog
                     isOpen={true}
