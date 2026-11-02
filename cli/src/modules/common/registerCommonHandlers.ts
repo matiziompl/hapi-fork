@@ -21,7 +21,6 @@ import { registerUploadHandlers } from './handlers/uploads'
 
 export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     registerAgyModelHandlers(rpcHandlerManager)
-    registerBashHandlers(rpcHandlerManager, workingDirectory)
     registerClaudeModelHandlers(rpcHandlerManager)
     registerCodexModelHandlers(rpcHandlerManager)
     registerCursorModelHandlers(rpcHandlerManager)
@@ -31,12 +30,18 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
     registerGrokModelHandlers(rpcHandlerManager)
     registerCopilotModelHandlers(rpcHandlerManager)
     registerKimiModelHandlers(rpcHandlerManager)
+    registerWorkingDirectoryHandlers(rpcHandlerManager, workingDirectory)
+    registerSkillsHandlers(rpcHandlerManager, workingDirectory)
+    registerUploadHandlers(rpcHandlerManager)
+}
+
+/** Rebind file operations after a native Codex /cd without replacing its catalogs or controls. */
+export function registerWorkingDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
+    registerBashHandlers(rpcHandlerManager, workingDirectory)
     registerFileHandlers(rpcHandlerManager, workingDirectory)
     registerDirectoryHandlers(rpcHandlerManager, workingDirectory)
     registerRipgrepHandlers(rpcHandlerManager, workingDirectory)
     registerDifftasticHandlers(rpcHandlerManager, workingDirectory)
     registerSlashCommandHandlers(rpcHandlerManager, workingDirectory)
-    registerSkillsHandlers(rpcHandlerManager, workingDirectory)
     registerGitHandlers(rpcHandlerManager, workingDirectory)
-    registerUploadHandlers(rpcHandlerManager)
 }

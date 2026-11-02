@@ -69,6 +69,13 @@ export default {
   'login.footer.copyright': '©',
 
   // Sessions page
+  'terminal.native.hint': 'Native CLI. Wait for its prompt, then send the command. Leaving this view closes this CLI terminal.',
+  'terminal.native.local': 'Local Codex settings conversation, using the Runner configuration. This terminal is separate from your current chat.',
+  'terminal.native.unavailable': 'Native CLI access is unavailable. Update the HAPI CLI on the Runner and reopen this session.',
+  'terminal.native.agy': 'AGY chat delivery waits while this terminal is open. Exit the CLI to resume chat delivery to the original conversation. Native conversation switches stay in this terminal.',
+  'terminal.native.command': 'CLI command',
+  'terminal.native.send': 'Send to CLI',
+  'terminal.native.chatError': 'Send this CLI command without attachments or a scheduled send time. Your draft and attachments have been kept.',
   'sessions.new': 'New Session',
   'sessions.empty.title': 'No sessions yet',
   'sessions.empty.hint': 'Start a coding session in any folder under your workspace, or browse the tree first.',

@@ -189,6 +189,31 @@ describe('terminal socket handlers', () => {
         expect(terminalRegistry.get('terminal-1')).toBeNull()
     })
 
+    it('forwards native launches and closes them when their viewer disconnects', () => {
+        const { terminalSocket, cliNamespace, terminalRegistry } = createHarness()
+        const cliSocket = new FakeSocket('native-cli')
+        connectCliSocket(cliNamespace, cliSocket, 'session-1')
+        terminalSocket.trigger('terminal:create', { sessionId: 'session-1', terminalId: 'native', cols: 100, rows: 30, nativeCli: true })
+        expect(lastEmit(cliSocket, 'terminal:open')?.data).toEqual({
+            sessionId: 'session-1', terminalId: 'native', cols: 100, rows: 30, nativeCli: true
+        })
+        terminalSocket.trigger('disconnect')
+        expect(lastEmit(cliSocket, 'terminal:close')?.data).toEqual({ sessionId: 'session-1', terminalId: 'native' })
+        expect(terminalRegistry.get('native')).toBeNull()
+    })
+
+    it('keeps an ordinary shell alive when its id was previously used by a native terminal', () => {
+        const { terminalSocket, cliNamespace, terminalRegistry } = createHarness()
+        const cliSocket = new FakeSocket('native-cli')
+        connectCliSocket(cliNamespace, cliSocket, 'session-1')
+        const request = { sessionId: 'session-1', terminalId: 'reused', cols: 80, rows: 24 }
+        terminalSocket.trigger('terminal:create', { ...request, nativeCli: true })
+        terminalSocket.trigger('terminal:close', { terminalId: 'reused' })
+        terminalSocket.trigger('terminal:create', request)
+        terminalSocket.trigger('disconnect')
+        expect(terminalRegistry.get('reused')).not.toBeNull()
+    })
+
     it('replays buffered output once when a replacement socket takes over the same terminal', () => {
         clearUserTerminalBuffer('session-1', 'terminal-1')
         clearUserTerminalBuffer('session-2', 'terminal-1')

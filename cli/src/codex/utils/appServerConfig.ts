@@ -147,16 +147,21 @@ export function buildUserInputFromMessage(
     skills: readonly SkillMetadata[] = []
 ): UserInput[] {
     const inputs: UserInput[] = [];
-    const skillMatch = /^\s*\$([^\s]+)(?=\s|$)/.exec(message);
-    const skill = skillMatch
-        ? skills.find(candidate => candidate.enabled && candidate.name === skillMatch[1])
-        : undefined;
-    const inputMessage = skill && skillMatch
-        ? message.slice(skillMatch[0].length)
-        : message;
-    if (skill) {
-        inputs.push({ type: 'skill', name: skill.name, path: skill.path });
-    }
+    const seen = new Set<string>();
+    const names = [...new Set(skills.filter(skill => skill.enabled).map(skill => skill.name))]
+        .filter(Boolean).sort((a, b) => b.length - a.length).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const references = new RegExp('```[\\s\\S]*?(?:```|$)|`[^`\\n]*`|(?<![\\w\\\\])\\$(?:\\[(' + names + ')\\]|(' + names + '))(?=$|[\\s,;:!?()[\\]{}]|\\.(?![\\w.-]))', 'g');
+    const inputMessage = !names ? message : message.replace(references,
+        (token, bracketName: string | undefined, name: string | undefined) => {
+            if (token.startsWith('`')) return token;
+            const skill = skills.find(candidate => candidate.enabled && candidate.name === (bracketName ?? name));
+            if (!skill) return token;
+            if (!seen.has(skill.path)) {
+                seen.add(skill.path);
+                inputs.push({ type: 'skill', name: skill.name, path: skill.path });
+            }
+            return '';
+        });
     const mentionPattern = /(^|\s)@"((?:\\.|[^"\\])*)"/g;
     let lastIndex = 0;
     let match: RegExpExecArray | null;

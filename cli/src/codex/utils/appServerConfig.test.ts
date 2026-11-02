@@ -659,6 +659,24 @@ describe('appServerConfig', () => {
         ]);
     });
 
+    it('resolves multiple inline skill references, including bracket notation, without activating code examples', () => {
+        const skills = ['plugin:build', 'review'].map(name => ({ name, path: `/skills/${name}/SKILL.md`,
+            description: name, scope: 'user', enabled: true }));
+        expect(buildUserInputFromMessage('Use $plugin:build then $[review]. Keep `$review` and $unknown.', skills)).toEqual([
+            { type: 'skill', name: 'plugin:build', path: '/skills/plugin:build/SKILL.md' },
+            { type: 'skill', name: 'review', path: '/skills/review/SKILL.md' },
+            { type: 'text', text: 'Use  then . Keep `$review` and $unknown.' }
+        ]);
+    });
+
+    it('supports dotted native names without treating an unknown dotted token as its shorter skill', () => {
+        const skills = ['foo', 'foo.bar'].map(name => ({ name, path: `/skills/${name}/SKILL.md`, description: '', scope: 'user', enabled: true }));
+        expect(buildUserInputFromMessage('$foo.bar. $foo.unknown', skills)).toEqual([
+            { type: 'skill', name: 'foo.bar', path: '/skills/foo.bar/SKILL.md' },
+            { type: 'text', text: '. $foo.unknown' }
+        ]);
+    });
+
     it('builds mention inputs from quoted @file tokens with spaces', () => {
         expect(buildUserInputFromMessage('please inspect @"docs/My File.md" now')).toEqual([
             { type: 'text', text: 'please inspect ' },

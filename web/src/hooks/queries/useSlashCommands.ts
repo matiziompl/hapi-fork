@@ -85,7 +85,7 @@ export function useSlashCommands(
             return commands.map(cmd => ({
                 key: `/${cmd.name}`,
                 text: `/${cmd.name}`,
-                label: `/${cmd.name}`,
+                label: `/${cmd.name}${cmd.execution === 'native' ? ' · CLI' : ''}`,
                 description: cmd.description ?? (cmd.source === 'builtin' ? undefined : 'Custom command'),
                 content: cmd.content,
                 source: cmd.source
@@ -111,7 +111,7 @@ export function useSlashCommands(
             .map(({ cmd }) => ({
                 key: `/${cmd.name}`,
                 text: `/${cmd.name}`,
-                label: `/${cmd.name}`,
+                label: `/${cmd.name}${cmd.execution === 'native' ? ' · CLI' : ''}`,
                 description: cmd.description ?? (cmd.source === 'builtin' ? undefined : 'Custom command'),
                 content: cmd.content,
                 source: cmd.source

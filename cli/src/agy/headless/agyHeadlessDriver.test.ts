@@ -106,6 +106,20 @@ const FULL_TURN = [
 ];
 
 describe('buildAgyHeadlessArgs', () => {
+    it('leases AGY exclusively for native CLI use and releases only on terminal exit', async () => {
+        const { session, queue } = createSession();
+        session.onSessionFound('brain-id');
+        const driver = new AgyHeadlessDriver({ session });
+        const launch = await driver.prepareNativeTerminal(new AbortController().signal);
+        expect(launch.command).toEqual(expect.arrayContaining(['agy', '--conversation', 'brain-id']));
+        await expect(driver.prepareNativeTerminal(new AbortController().signal)).rejects.toThrow('already open');
+        launch.onExit?.();
+        queue.push('queued', { permissionMode: 'request-review' }, 'queued-id');
+        await expect(driver.prepareNativeTerminal(new AbortController().signal)).rejects.toThrow('queued');
+        queue.cancelByLocalId('queued-id');
+        const second = await driver.prepareNativeTerminal(new AbortController().signal);
+        second.onExit?.();
+    });
     it('builds persistent stream args without placing the prompt on the command line', () => {
         const args = buildAgyHeadlessArgs({
             permissionMode: 'request-review',

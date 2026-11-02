@@ -34,6 +34,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
     const { io, getSession, terminalRegistry, maxTerminalsPerSocket, maxTerminalsPerSession } = deps
     const cliNamespace = io.of('/cli')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
+    const nativeTerminals = new Set<string>()
 
     const emitTerminalError = (terminalId: string, message: string) => {
         socket.emit('terminal:error', { terminalId, message })
@@ -90,7 +91,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
             return
         }
 
-        const { sessionId, terminalId, cols, rows } = parsed.data
+        const { sessionId, terminalId, cols, rows, nativeCli, nativeCliContext } = parsed.data
         const session = getSession(sessionId)
         if (!namespace || !session || session.namespace !== namespace || !session.active) {
             emitTerminalError(terminalId, 'Session is inactive or unavailable.')
@@ -136,8 +137,12 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
             sessionId,
             terminalId,
             cols,
-            rows
+            rows,
+            ...(nativeCli !== undefined ? { nativeCli } : {}),
+            ...(nativeCliContext ? { nativeCliContext } : {})
         })
+        if (nativeCli) nativeTerminals.add(terminalId)
+        else nativeTerminals.delete(terminalId)
         terminalRegistry.markActivity(terminalId)
 
         // Replay buffered output so the terminal shows scrollback immediately
@@ -329,6 +334,14 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
     })
 
     socket.on('disconnect', () => {
+        // A native CLI can hold AGY's exclusive writer lease. Detaching its
+        // viewer must close that owned process rather than park it for 15 min.
+        for (const terminalId of nativeTerminals) {
+            const entry = terminalRegistry.get(terminalId)
+            if (entry?.socketId !== socket.id) continue
+            resolveCliSocket(entry, false)?.emit('terminal:close', { sessionId: entry.sessionId, terminalId })
+            terminalRegistry.remove(terminalId)
+        }
         // Socket.IO reconnects with a new socket id. Keep the PTY and its
         // scrollback alive until the normal idle timeout; terminal:create with
         // the same terminal id will rebind it to the replacement socket.

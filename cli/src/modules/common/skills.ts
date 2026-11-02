@@ -2,6 +2,7 @@ import { access, open, readdir, readFile, stat } from 'fs/promises';
 import { basename, dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
+import { listAgySkills } from './agySkills';
 
 export interface SkillSummary {
     name: string;
@@ -334,6 +335,9 @@ async function discoverSkills(workingDirectory?: string, options: { flavor?: str
 }
 
 export async function listSkills(workingDirectory?: string, options: { flavor?: string } = {}): Promise<SkillSummary[]> {
+    if (normalizeFlavor(options.flavor) === 'agy') {
+        return (await listAgySkills(workingDirectory)).map(({ name, description }) => ({ name, description }));
+    }
     const skills = await discoverSkills(workingDirectory, options);
     return skills.map(({ name, description }) => ({ name, description }));
 }

@@ -12,6 +12,8 @@ type UseTerminalSocketOptions = {
     token: string
     sessionId: string
     terminalId: string
+    nativeCli?: boolean
+    nativeCliContext?: 'session' | 'local'
 }
 
 type TerminalReadyPayload = {
@@ -85,9 +87,10 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
             sessionId: sessionIdRef.current,
             terminalId: terminalIdRef.current,
             cols: size.cols,
-            rows: size.rows
+            rows: size.rows,
+            ...(options.nativeCli ? { nativeCli: true, ...(options.nativeCliContext ? { nativeCliContext: options.nativeCliContext } : {}) } : {})
         })
-    }, [])
+    }, [options.nativeCli, options.nativeCliContext])
 
     const setErrorState = useCallback((message: string) => {
         setState({ status: 'error', error: message })
@@ -208,11 +211,12 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
         if (!socket) {
             return
         }
+        if (options.nativeCli && socket.connected) socket.emit('terminal:close', { terminalId: terminalIdRef.current })
         socket.removeAllListeners()
         socket.disconnect()
         socketRef.current = null
         setState({ status: 'idle' })
-    }, [])
+    }, [options.nativeCli])
 
     const onOutput = useCallback((handler: (data: string) => void) => {
         outputHandlerRef.current = handler

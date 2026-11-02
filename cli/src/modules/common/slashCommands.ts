@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import { getBuiltinSlashCommands, mergeSlashCommands } from '@hapi/protocol/slashCommands';
 import type { SlashCommand, SlashCommandsResponse } from '@hapi/protocol/apiTypes';
+import { listAgySkills } from './agySkills';
 
 export type { SlashCommand } from '@hapi/protocol/apiTypes';
 
@@ -285,6 +286,13 @@ async function scanPluginCommands(agent: string): Promise<SlashCommand[]> {
  */
 export async function listSlashCommands(agent: string, projectDir?: string): Promise<SlashCommand[]> {
     const builtin = getBuiltinSlashCommands(agent);
+    if (agent === 'agy') {
+        const skills = await listAgySkills(projectDir);
+        const reserved = new Set(builtin.map(command => command.name));
+        return [...builtin, ...skills.filter(skill => !reserved.has(skill.name)).map(skill => ({
+            name: skill.name, description: skill.description, source: 'user' as const
+        }))];
+    }
 
     // Scan all command sources in parallel
     const [user, plugin, project] = await Promise.all([

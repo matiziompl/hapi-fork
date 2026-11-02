@@ -17,6 +17,7 @@ import { resolveAgyTurnModels } from '../utils/agyConversationModel';
 import { AgyStreamProcess } from './agyStreamProcess';
 import { AGY_EFFORT_LEVELS, AGY_MODEL_LABELS, splitAgyModelSelection, type AgyEffortLevel } from '@hapi/protocol';
 import { getAgentLaunchCommand } from '@/agent/agentLaunchCommand';
+import type { NativeTerminalLaunch } from '@/terminal/TerminalManager';
 
 const AGY_PRINT_TIMEOUT = '30m';
 
@@ -95,6 +96,8 @@ export class AgyHeadlessDriver extends RemoteLauncherBase {
     private turnAbortController: AbortController | null = null;
     /** Brain conversation UUID — from resume seed or the first turn's init event. */
     private conversationId: string | null;
+    private nativeTerminal: Promise<void> | null = null;
+    private dequeueStarting = false;
 
     constructor(opts: AgyHeadlessDriverOptions) {
         super(process.env.DEBUG ? opts.session.logPath : undefined);
@@ -111,6 +114,42 @@ export class AgyHeadlessDriver extends RemoteLauncherBase {
         this.conversationId = this.session.sessionId;
         this.session.setKillHandler(() => this.abort());
         this.session.cancelRetryDelivery = this.cancelRetryItem;
+        this.session.client.setNativeTerminalLauncher?.(signal => this.prepareNativeTerminal(signal));
+    }
+
+    async prepareNativeTerminal(signal: AbortSignal): Promise<NativeTerminalLaunch> {
+        signal.throwIfAborted();
+        if (this.nativeTerminal) throw new Error('An AGY native terminal is already open. Exit it before opening another.');
+        if (this.activeTurn || this.turnAbortController || this.dequeueStarting || this.retryDelivery || this.session.queue.size()) {
+            throw new Error('AGY has active or queued work. Stop or finish it before opening the native terminal.');
+        }
+        if (this.loopAbortController.signal.aborted) throw new Error('AGY session is stopping');
+        let release!: () => void;
+        const lease = new Promise<void>(resolve => { release = resolve; });
+        this.nativeTerminal = lease;
+        const onExit = () => {
+            if (this.nativeTerminal !== lease) return;
+            this.nativeTerminal = null;
+            release();
+            void this.syncTitleIfKnown();
+        };
+        try {
+            // Release the warm headless writer before starting an interactive one.
+            await this.terminateChild(true);
+            signal.throwIfAborted();
+            const mode = this.session.getNativeLaunchMode();
+            const model = mode.model ?? undefined;
+            const effort = mode.effort ?? undefined;
+            const args = [getAgentLaunchCommand('agy'),
+                ...(this.conversationId ? ['--conversation', this.conversationId] : []),
+                ...(model ? ['--model', model] : []),
+                ...(effort && !splitAgyModelSelection(model).effort ? ['--effort', effort] : []),
+                ...(mode.permissionMode === 'always-proceed' ? ['--dangerously-skip-permissions'] : [])];
+            // TerminalManager supplies the filtered operator environment; only
+            // AGY's auth workaround belongs in this launch override.
+            return { command: args, env: { GEMINI_FORCE_FILE_STORAGE: 'true',
+                ...Object.fromEntries(Object.keys(process.env).filter(key => key.startsWith('SSH_')).map(key => [key, undefined])) }, onExit };
+        } catch (error) { onExit(); throw error; }
     }
 
     protected createDisplay(context: RemoteLauncherDisplayContext): React.ReactElement {
@@ -712,8 +751,25 @@ export class AgyHeadlessDriver extends RemoteLauncherBase {
         try {
             let consecutiveUnaccepted = 0;
             while (!this.exitReason && !this.loopAbortController.signal.aborted) {
-                const msg = await session.queue.waitForMessagesAndGetAsString(this.loopAbortController.signal);
-                if (!msg) break;
+                let waitedForNative = false;
+                const msg = await session.queue.waitForMessagesAndGetAsString(this.loopAbortController.signal, async () => {
+                    while (this.nativeTerminal && !this.loopAbortController.signal.aborted) {
+                        waitedForNative = true;
+                        const signal = this.loopAbortController.signal;
+                        await new Promise<void>(resolve => {
+                            const done = () => { signal.removeEventListener('abort', done); resolve(); };
+                            signal.addEventListener('abort', done, { once: true });
+                            void this.nativeTerminal!.then(done);
+                            if (signal.aborted) done();
+                        });
+                    }
+                    this.dequeueStarting = true;
+                });
+                if (!msg) {
+                    this.dequeueStarting = false;
+                    if (waitedForNative && !this.loopAbortController.signal.aborted) continue;
+                    break;
+                }
                 const localIds = (msg.items ?? [])
                     .map((item) => item.localId)
                     .filter((localId): localId is string => Boolean(localId));
@@ -721,6 +777,7 @@ export class AgyHeadlessDriver extends RemoteLauncherBase {
                 // in-flight turn only and the loop keeps serving later messages.
                 const turnController = new AbortController();
                 this.turnAbortController = turnController;
+                this.dequeueStarting = false;
                 const onLoopAbort = () => turnController.abort();
                 this.loopAbortController.signal.addEventListener('abort', onLoopAbort, { once: true });
                 if (this.loopAbortController.signal.aborted) turnController.abort();

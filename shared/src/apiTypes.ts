@@ -1088,6 +1088,9 @@ export type SlashCommand = {
     source: 'builtin' | 'user' | 'plugin' | 'project'
     content?: string
     pluginName?: string
+    /** Open the real CLI in HAPI's terminal instead of sending a model prompt. */
+    execution?: 'native'
+    nativeCliContext?: 'local'
 }
 
 export type SlashCommandsResponse = {

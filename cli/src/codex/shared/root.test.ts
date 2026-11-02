@@ -6,6 +6,8 @@ import type { SessionBootstrapResult } from '@/agent/sessionFactory';
 import { SharedCodexRoot, type RootHost } from './root';
 import { codexPlanProposalId } from './plan';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import * as registry from './registry';
+import type { NativeTerminalLauncher } from '@/terminal/TerminalManager';
 
 type NativeTurn = { id: string; status: string; items: unknown[] };
 type NativeRequest = { id: string | number; method: string; params: unknown };
@@ -62,6 +64,8 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
     let reconnect: (() => void) | null = null;
+    let userMessage: ((message: unknown, localId?: string) => void) | undefined;
+    let nativeTerminal: NativeTerminalLauncher | undefined;
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
     const send = vi.fn();
@@ -70,10 +74,12 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
     const hubArchivedListeners: Array<() => void> = [];
     const session = {
         sessionId: 'sid', getMetadata: () => metadata,
+        setWorkingDirectory: (path: string) => { metadata = { ...metadata, path }; },
+        setNativeTerminalLauncher: (launcher: NativeTerminalLauncher) => { nativeTerminal = launcher; },
         hubArchived: opts?.hubArchived ?? false,
         updateMetadata: (fn: (value: Metadata) => Metadata) => { metadata = fn(metadata); },
         updateAgentState: updateState, keepAlive() {},
-        onUserMessage() {}, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
+        onUserMessage(handler: typeof userMessage) { userMessage = handler; }, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
         onReconnect: (fn: (() => void) | null) => { reconnect = fn; },
         on(event: string, listener: () => void) {
             if (event === 'hub-archived') hubArchivedListeners.push(listener);
@@ -103,6 +109,8 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
     };
     return {
         root, native, rpc, send, consumed, uncertain, metadata: () => metadata, state: () => state, updateState,
+        sendUser: (text: string, id = 'skill-input') => userMessage?.({ content: { text } }, id),
+        launchNative: (context: 'session' | 'local') => nativeTerminal?.(new AbortController().signal, context),
         drain: () => (root as unknown as { notifications: Promise<void> }).notifications,
         reconnect: () => reconnect?.(),
         emitHubArchived: () => { for (const listener of hubArchivedListeners) listener(); },
@@ -110,6 +118,84 @@ async function fixture(opts?: { hubArchived?: boolean; end?: RootHost['end']; cr
         end,
     };
 }
+
+it('lists native skills and sends $skill references as structured inputs in the shared runtime', async () => {
+    const f = await fixture();
+    const original = f.root.client.request.bind(f.root.client);
+    const skill = { name: 'plugin:build', description: 'Build', enabled: true, path: '/native/SKILL.md', scope: 'user' };
+    const request = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+        if (method === 'skills/list') return { data: [{ cwd: f.metadata().path, skills: [skill, { ...skill, name: 'off', enabled: false }] }] };
+        return original(method, params);
+    });
+    await f.root.activate();
+    expect(await f.rpc.get(RPC_METHODS.ListSkills)?.({})).toEqual({ success: true,
+        skills: [{ name: 'plugin:build', description: 'Build' }] });
+    f.sendUser('Please use $plugin:build now');
+    await vi.waitFor(() => expect(f.native.queue[0]?.input).toEqual([
+        { type: 'skill', name: 'plugin:build', path: '/native/SKILL.md' },
+        { type: 'text', text: 'Please use  now' }
+    ]));
+    expect(request).toHaveBeenCalledWith('skills/list', { cwds: [f.metadata().path], forceReload: true });
+});
+
+it('refreshes the native skill catalog after cwd and skill changes', async () => {
+    const f = await fixture();
+    const original = f.root.client.request.bind(f.root.client);
+    const request = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+        if (method === 'skills/list') {
+            const cwd = (params as { cwds: string[] }).cwds[0];
+            return { data: [{ cwd, skills: [{ name: 'local', description: cwd, enabled: true, path: `${cwd}/SKILL.md`, scope: 'project' }] }] };
+        }
+        return original(method, params);
+    });
+    await f.root.activate();
+    await f.rpc.get(RPC_METHODS.ListSkills)?.({});
+    const cwd = `${f.metadata().path}/subproject`;
+    f.root.acceptSettings({ model: 'mock', cwd });
+    f.sendUser('$local check this project');
+    await vi.waitFor(() => expect(f.native.queue[0]?.input).toContainEqual({ type: 'skill', name: 'local', path: `${cwd}/SKILL.md` }));
+    f.native.notify('skills/changed', {});
+    f.sendUser('$local check again', 'second-input');
+    await vi.waitFor(() => expect(request.mock.calls.filter(call => call[0] === 'skills/list')).toHaveLength(3));
+});
+
+it('does not enqueue a skill from the old directory when native cwd changes during discovery', async () => {
+    const f = await fixture();
+    const original = f.root.client.request.bind(f.root.client);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let first = true;
+    const request = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+        if (method !== 'skills/list') return original(method, params);
+        const cwd = (params as { cwds: string[] }).cwds[0];
+        if (first) { first = false; await held; }
+        return { data: [{ cwd, skills: [{ name: 'local', description: cwd, enabled: true, path: `${cwd}/SKILL.md`, scope: 'project' }] }] };
+    });
+    await f.root.activate();
+    f.sendUser('$local check');
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('skills/list', expect.anything()));
+    const cwd = `${f.metadata().path}/new`;
+    f.root.acceptSettings({ model: 'mock', cwd });
+    release();
+    await vi.waitFor(() => expect(f.native.queue[0]?.input).toContainEqual({ type: 'skill', name: 'local', path: `${cwd}/SKILL.md` }));
+});
+
+it('attaches native CLI to the owned runtime and keeps local imports separate from its thread', async () => {
+    const f = await fixture();
+    const find = vi.spyOn(registry, 'findRuntime').mockResolvedValue({ command: '/exact/codex', args: [],
+        codexHome: '/codex-home', endpoint: 'ws://private', token: 'secret-token',
+        sessions: { sid: { threadId: 'thread' } } } as unknown as registry.CodexRuntimeRecord);
+    try {
+        await f.root.activate();
+        const attached = await f.launchNative('session');
+        expect(attached?.command).toEqual(['/exact/codex', '--remote', 'ws://private', '--remote-auth-token-env', 'HAPI_CODEX_REMOTE_TOKEN', 'resume', 'thread']);
+        expect(attached?.command.join(' ')).not.toContain('secret-token');
+        expect(attached?.env).toMatchObject({ CODEX_HOME: '/codex-home', HAPI_CODEX_REMOTE_TOKEN: 'secret-token' });
+        const local = await f.launchNative('local');
+        expect(local?.command).toEqual(['/exact/codex']);
+        expect(local?.env).toEqual({ CODEX_HOME: '/codex-home' });
+    } finally { find.mockRestore(); }
+});
 
 it('routes explicit close to non-archiving cleanup of this root only', async () => {
     const end = vi.fn(async () => {})

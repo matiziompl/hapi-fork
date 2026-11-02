@@ -5,6 +5,9 @@ import type { SessionBootstrapResult } from '@/agent/sessionFactory';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { logger } from '@/ui/logger';
 import { listSlashCommands } from '@/modules/common/slashCommands';
+import { findNativeCliCommand } from '@hapi/protocol/slashCommands';
+import type { SkillMetadata, SkillsListResponse } from '../appServerTypes';
+import { findRuntime } from './registry';
 import { normalizeCodexModel } from '@/modules/common/codexModels';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
@@ -74,6 +77,10 @@ export class SharedCodexRoot {
     private reconnecting = false;
     private settings: RuntimeSettings = {};
     private settingsNative: Record<string, unknown> = {};
+    private skills: SkillMetadata[] = [];
+    private skillsLoaded = false;
+    private skillsRevision = 0;
+    private skillsRefresh?: Promise<SkillMetadata[]>;
     private settingsNotification?: Record<string, unknown>;
     private readonly settingsListeners = new Set<() => void>();
     private ready!: () => void;
@@ -83,6 +90,7 @@ export class SharedCodexRoot {
         this.session = bootstrap.session;
         this.client = new CodexAppServerClient({ endpoint: host.endpoint, token: host.token, cwd: bootstrap.workingDirectory });
         this.client.setNotificationHandler((method, params) => {
+            if (method === 'skills/changed') { this.skillsLoaded = false; this.skillsRevision++; }
             if (method === 'serverRequest/resolved') {
                 this.permissions?.resolved(string(record(params).threadId) ?? '', record(params).requestId); return;
             }
@@ -125,7 +133,8 @@ export class SharedCodexRoot {
                 const text = formatMessageWithAttachments(message.content.text, message.content.attachments);
                 const resolved = text.trim().startsWith('/') ? await this.queue.command(id, () => this.command(text)) : text;
                 if (resolved === null) { this.session.emitMessagesConsumed([id], { clearQueuedThinkingGrace: true }); return; }
-                await this.queue.enqueue(id, buildUserInputFromMessage(resolved), this.interrupted);
+                const skills = /\$(?:\[|[\w])/.test(resolved) ? await this.loadSkills(false) : [];
+                await this.queue.enqueue(id, buildUserInputFromMessage(resolved, skills), this.interrupted);
             }).catch(error => this.notice(`Message not confirmed: ${error instanceof Error ? error.message : error}. Inspect the queue before retrying.`));
         });
         this.session.onCancelQueuedMessage(async id => { await this.bound; return this.stopping ? 'indeterminate' : this.queue.cancel(id); });
@@ -263,6 +272,10 @@ export class SharedCodexRoot {
         this.settingsRevision++;
         if ('collaborationMode' in value && 'sandboxPolicy' in value) this.settingsNotification = value;
         this.settingsNative = { ...this.settingsNative, ...value };
+        if (typeof value.cwd === 'string' && value.cwd !== this.session.getMetadata()?.path) {
+            this.session.setWorkingDirectory(value.cwd);
+            this.skillsLoaded = false; this.skillsRevision++;
+        }
         const sandbox = record(value.sandboxPolicy ?? value.sandbox).type;
         this.settings = { ...this.settings, model: value.model,
             modelReasoningEffort: string(value.effort ?? value.reasoningEffort) ?? null,
@@ -501,6 +514,20 @@ export class SharedCodexRoot {
         } finally { this.submittingPlan = false; this.publishPlan(); }
     }
     private registerControls(): void {
+        this.session.setNativeTerminalLauncher?.(async (signal, context) => {
+            if (this.closed || this.stopping) throw new Error('Codex session is stopping')
+            const runtime = await findRuntime(this.session.sessionId)
+            signal.throwIfAborted()
+            if (!runtime || runtime.sessions[this.session.sessionId]?.threadId !== this.threadId) {
+                throw new Error('The native Codex runtime is unavailable. Reopen this session and retry.')
+            }
+            // /import is deliberately unavailable in a remote TUI. Open a local
+            // settings conversation; never cold-resume a thread owned here.
+            if (context === 'local') return { command: [runtime.command, ...runtime.args], env: { CODEX_HOME: runtime.codexHome } };
+            return { command: [runtime.command, ...runtime.args, '--remote', runtime.endpoint,
+                ...(runtime.token ? ['--remote-auth-token-env', 'HAPI_CODEX_REMOTE_TOKEN'] : []), 'resume', this.threadId],
+                env: { CODEX_HOME: runtime.codexHome, ...(runtime.token ? { HAPI_CODEX_REMOTE_TOKEN: runtime.token } : {}) } }
+        });
         const rpc = { registerHandler: (method: string, handler: (raw: unknown) => Promise<unknown>) => {
             this.session.rpcHandlerManager.registerHandler(method, async (raw: unknown) => {
                 if (this.stopping) throw new Error('Codex execution is stopping; resume when inactive');
@@ -508,6 +535,8 @@ export class SharedCodexRoot {
                 try { return await pending; } finally { this.controls.delete(pending); }
             });
         } };
+        rpc.registerHandler(RPC_METHODS.ListSkills, async () => ({ success: true,
+            skills: (await this.loadSkills(true)).map(({ name, description }) => ({ name, description })) }));
         rpc.registerHandler(RPC_METHODS.ListCodexModels, async raw => {
             const models = []; let cursor: string | undefined;
             do {
@@ -578,6 +607,27 @@ export class SharedCodexRoot {
             throw new Error('In-place rewind is not supported for concurrent Codex clients; fork at the message instead');
         });
     }
+    private async loadSkills(forceReload: boolean): Promise<SkillMetadata[]> {
+        if (!forceReload && this.skillsLoaded) return this.skills;
+        if (this.skillsRefresh) {
+            await this.skillsRefresh;
+            return this.skillsLoaded ? this.skills : this.loadSkills(true);
+        }
+        const cwd = string(this.settingsNative.cwd) ?? this.session.getMetadata()?.path ?? this.bootstrap.workingDirectory;
+        const revision = this.skillsRevision;
+        const pending = this.skillsRefresh = (async () => {
+            const response = await this.client.request<SkillsListResponse>('skills/list', { cwds: [cwd], forceReload });
+            const inventory = response.data?.find(entry => entry.cwd === cwd);
+            if (!inventory || !Array.isArray(inventory.skills) || inventory.errors?.length && inventory.skills.length === 0) {
+                throw new Error('Codex returned no usable skill catalog for this workspace');
+            }
+            this.skills = inventory.skills.filter(skill => skill.enabled && typeof skill.name === 'string' && typeof skill.path === 'string');
+            this.skillsLoaded = revision === this.skillsRevision;
+            return this.skills;
+        })();
+        try { await pending; } finally { if (this.skillsRefresh === pending) this.skillsRefresh = undefined; }
+        return this.skillsLoaded ? this.skills : this.loadSkills(true);
+    }
     private async assertBoundary(localId: string, turnId: string): Promise<Record<string, unknown>> {
         const thread = await this.readThread(this.threadId, true);
         const turn = (Array.isArray(thread.turns) ? thread.turns.map(record) : []).find(turn => turn.id === turnId);
@@ -607,7 +657,12 @@ export class SharedCodexRoot {
         if (command === '/compact') { await this.client.request('thread/compact/start', { threadId: this.threadId }); return null; }
         if (command === '/exit') { this.notice('/exit closes a native terminal, not this Web view. Use End session to archive this conversation.'); return null; }
         if (!command.startsWith('/')) return text;
-        const slash = resolveCodexSlashCommand(text, { commands: await listSlashCommands('codex', this.bootstrap.workingDirectory),
+        const commands = await listSlashCommands('codex', string(this.settingsNative.cwd) ?? this.session.getMetadata()?.path ?? this.bootstrap.workingDirectory);
+        if (findNativeCliCommand(text, 'codex', commands)) {
+            this.notice(`This command requires the [native Codex terminal](/sessions/${this.session.sessionId}/terminal?native=true). Enter it there; it has not been sent to the model.`);
+            return null;
+        }
+        const slash = resolveCodexSlashCommand(text, { commands,
             permissionMode: this.settings.permissionMode === 'yolo' || this.settings.permissionMode === 'read-only' || this.settings.permissionMode === 'autoReview' ? this.settings.permissionMode : 'default',
             collaborationMode: this.settings.collaborationMode ?? 'default', model: this.settings.model ?? undefined,
             modelReasoningEffort: parseReasoningEffortValue(this.settings.modelReasoningEffort), serviceTier: this.settings.serviceTier });

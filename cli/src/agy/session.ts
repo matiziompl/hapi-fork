@@ -76,6 +76,10 @@ export class AgySession extends AgentSessionBase<AgyMode> {
         this.effort = effort;
     };
 
+    getNativeLaunchMode = (): AgyMode => ({
+        permissionMode: this.permissionMode === 'always-proceed' ? 'always-proceed' : 'request-review', model: this.model, effort: this.effort
+    });
+
     recordLocalLaunchFailure = (message: string, exitReason: LocalLaunchExitReason): void => {
         this.localLaunchFailure = { message, exitReason };
     };

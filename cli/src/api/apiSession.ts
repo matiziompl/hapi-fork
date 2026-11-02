@@ -36,9 +36,10 @@ import type {
 } from './types'
 import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
-import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { registerCommonHandlers, registerWorkingDirectoryHandlers } from '../modules/common/registerCommonHandlers'
 import { cleanupUploadDir, preserveUploadDirOnExit } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
+import type { NativeTerminalLauncher } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 
@@ -263,6 +264,17 @@ export class ApiSessionClient extends EventEmitter {
     private latestKeepAlive: Omit<Parameters<ClientToServerEvents['session-alive']>[0], 'sid' | 'time'> | null = null
     readonly rpcHandlerManager: RpcHandlerManager
     private readonly terminalManager: TerminalManager
+    private nativeTerminalLauncher?: NativeTerminalLauncher
+
+    setNativeTerminalLauncher(launcher: NativeTerminalLauncher): void {
+        this.nativeTerminalLauncher = launcher
+        this.updateMetadata(metadata => ({ ...metadata, capabilities: { ...metadata.capabilities, nativeCli: true } }))
+    }
+
+    setWorkingDirectory(directory: string): void {
+        registerWorkingDirectoryHandlers(this.rpcHandlerManager, directory)
+        this.updateMetadata(metadata => ({ ...metadata, path: directory }))
+    }
     private agentTerminalResize: ((cols: number, rows: number) => void) | null = null
     // Writes raw keystroke(s) from a web viewer into the agent PTY (interactive
     // TUI navigation). Null until the agent is spawned and after it exits.
@@ -333,6 +345,10 @@ export class ApiSessionClient extends EventEmitter {
         this.terminalManager = new TerminalManager({
             sessionId: this.sessionId,
             getSessionPath: () => this.metadata?.path ?? null,
+            prepareNativeCli: (signal, context) => {
+                if (!this.nativeTerminalLauncher) throw new Error('This session has no native CLI terminal. Update the Runner and reopen the session.')
+                return this.nativeTerminalLauncher(signal, context)
+            },
             onReady: (payload) => this.socket.emit('terminal:ready', payload),
             onOutput: (payload) => this.socket.emit('terminal:output', payload),
             onExit: (payload) => this.socket.emit('terminal:exit', payload),
@@ -410,7 +426,7 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         this.socket.on('terminal:open', handleTerminalEvent(TerminalOpenPayloadSchema, (payload) => {
-            this.terminalManager.create(payload.terminalId, payload.cols, payload.rows)
+            void this.terminalManager.create(payload.terminalId, payload.cols, payload.rows, payload.nativeCli, payload.nativeCliContext)
         }))
 
         this.socket.on('terminal:write', handleTerminalEvent(TerminalWritePayloadSchema, (payload) => {

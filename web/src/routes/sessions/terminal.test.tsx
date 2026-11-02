@@ -1,9 +1,14 @@
 import { useEffect } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import { clearDraft, getDraft } from '@/lib/composer-drafts'
 import TerminalPage, { buildTerminalCommandSequence } from './terminal'
+import { saveNativeCommandDraft, getNativeCommandDraft, clearNativeCommandDraft } from '@/lib/nativeCommands'
+
+let nativeRoute = false
+let nativeAvailable = true
+afterEach(() => { nativeRoute = false; nativeAvailable = true; clearNativeCommandDraft('session-1') })
 
 const writeMock = vi.fn()
 const goBackMock = vi.fn()
@@ -64,6 +69,7 @@ const terminalSocketState = {
 }
 
 vi.mock('@tanstack/react-router', () => ({
+    useSearch: () => nativeRoute ? { native: true } : {},
     useParams: () => ({ sessionId: 'session-1' }),
     useNavigate: () => navigateMock,
 }))
@@ -85,7 +91,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
         session: {
             id: 'session-1',
             active: true,
-            metadata: { path: '/tmp/project' }
+            metadata: { path: '/tmp/project', capabilities: { nativeCli: nativeAvailable } }
         }
     })
 }))
@@ -150,6 +156,29 @@ function renderWithProviders() {
 }
 
 describe('TerminalPage paste behavior', () => {
+    it('keeps the native command pending until the operator sends it to the CLI', async () => {
+        vi.clearAllMocks()
+        setCompactTerminalControls(false)
+        nativeRoute = true
+        saveNativeCommandDraft('session-1', '/plugins')
+        renderWithProviders()
+        expect(screen.getByRole('textbox', { name: 'CLI command' })).toHaveValue('/plugins')
+        expect(writeMock).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByRole('button', { name: 'Send to CLI' }))
+        expect(writeMock).toHaveBeenCalledWith(buildTerminalCommandSequence('/plugins'))
+        expect(getNativeCommandDraft('session-1')).toBe('')
+    })
+
+    it('refuses native launch on an older CLI instead of opening a shell', async () => {
+        vi.clearAllMocks()
+        nativeRoute = true
+        nativeAvailable = false
+        saveNativeCommandDraft('session-1', '/config')
+        renderWithProviders()
+        expect(screen.getByRole('alert')).toHaveTextContent('Update the HAPI CLI')
+        expect(connectMock).not.toHaveBeenCalled()
+        expect(getNativeCommandDraft('session-1')).toBe('/config')
+    })
     beforeEach(() => {
         vi.clearAllMocks()
         setCompactTerminalControls(false)

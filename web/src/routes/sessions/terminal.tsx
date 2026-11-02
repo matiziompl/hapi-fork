@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -19,6 +19,7 @@ import {
     extractTerminalExcerpt,
 } from '@/lib/terminal-composer'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
+import { getNativeCommandDraft, clearNativeCommandDraft } from '@/lib/nativeCommands'
 import {
     Dialog,
     DialogContent,
@@ -262,11 +263,13 @@ export default function TerminalPage() {
     const { t } = useTranslation()
     const compactControls = useCompactTerminalControls()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
+    const { native: nativeCli = false, local: localCli = false } = useSearch({ from: '/sessions/$sessionId/terminal' })
     const navigate = useNavigate()
     const { api, token, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
     const terminalSupported = isRemoteTerminalSupported(session?.metadata)
+        && (!nativeCli || session?.metadata?.capabilities?.nativeCli === true)
     // A per-viewer-unique terminal id. Two browsers/tabs/devices viewing the
     // same session must each drive their own shell: the hub registry evicts a
     // reused id arriving from a different socket as a stale reconnect
@@ -276,9 +279,10 @@ export default function TerminalPage() {
     // (userTerminalBuffer.ts), not via a stable id. Held in a ref so it stays
     // constant across re-renders and transient socket reconnects, and
     // regenerates only when the route switches to a different session.
+    const terminalKey = `${sessionId}:${nativeCli ? localCli ? 'local-cli' : 'cli' : 'shell'}`
     const terminalIdRef = useRef<{ sessionId: string; id: string } | null>(null)
-    if (terminalIdRef.current?.sessionId !== sessionId) {
-        terminalIdRef.current = { sessionId, id: `term-${sessionId}-${randomId()}` }
+    if (terminalIdRef.current?.sessionId !== terminalKey) {
+        terminalIdRef.current = { sessionId: terminalKey, id: `term-${sessionId}-${randomId()}` }
     }
     const terminalId = terminalIdRef.current.id
     const terminalRef = useRef<Terminal | null>(null)
@@ -294,7 +298,7 @@ export default function TerminalPage() {
     } | null>(null)
     const [inputMode, setInputMode] = useState<TerminalInputMode>('command')
     const [directKeyPage, setDirectKeyPage] = useState<DirectKeyPage>('control')
-    const [commandDraft, setCommandDraft] = useState('')
+    const [commandDraft, setCommandDraft] = useState(() => nativeCli ? getNativeCommandDraft(sessionId) : '')
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
     const [hasSelection, setHasSelection] = useState(false)
@@ -312,6 +316,8 @@ export default function TerminalPage() {
         sessionId,
         terminalId,
         baseUrl,
+        nativeCli,
+        nativeCliContext: localCli ? 'local' : 'session',
     })
 
     useEffect(() => {
@@ -396,7 +402,7 @@ export default function TerminalPage() {
     useEffect(() => {
         connectOnceRef.current = false
         setExitInfo(null)
-        setCommandDraft('')
+        setCommandDraft(nativeCli ? getNativeCommandDraft(sessionId) : '')
         setInputMode('command')
         setDirectKeyPage('control')
         setHasSelection(false)
@@ -405,7 +411,7 @@ export default function TerminalPage() {
             exitNavTimerRef.current = null
         }
         disconnect()
-    }, [sessionId, disconnect])
+    }, [sessionId, nativeCli, disconnect])
 
     useEffect(() => {
         return () => {
@@ -532,10 +538,11 @@ export default function TerminalPage() {
             return
         }
         write(buildTerminalCommandSequence(commandDraft))
+        if (nativeCli) clearNativeCommandDraft(sessionId)
         setCommandDraft('')
         resetModifiers()
         requestAnimationFrame(() => commandInputRef.current?.focus())
-    }, [commandDraft, commandSubmitDisabled, write, resetModifiers])
+    }, [commandDraft, commandSubmitDisabled, write, resetModifiers, nativeCli, sessionId])
 
     const handleCommandKeyDown = useCallback(
         (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -617,6 +624,23 @@ export default function TerminalPage() {
                     <ConnectionIndicator status={status} />
                 </div>
             </div>
+
+            {nativeCli ? (
+                <div className="mx-auto w-full max-w-content border-b border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-fg)]">
+                    <p>{t('terminal.native.hint')}</p>
+                    {localCli ? <p className="mt-1">{t('terminal.native.local')}</p> : null}
+                    {!terminalSupported ? <p role="alert">{t('terminal.native.unavailable')}</p> : null}
+                    {session.metadata?.flavor === 'agy' ? <p className="mt-1">{t('terminal.native.agy')}</p> : null}
+                    {!compactControls && commandDraft ? (
+                        <form className="mt-2 flex items-center gap-2" onSubmit={event => { event.preventDefault(); handleCommandSubmit() }}>
+                            <input aria-label={t('terminal.native.command')} value={commandDraft}
+                                onChange={event => setCommandDraft(event.target.value)}
+                                className="min-w-0 flex-1 rounded border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)]" />
+                            <Button type="submit" disabled={commandSubmitDisabled}>{t('terminal.native.send')}</Button>
+                        </form>
+                    ) : null}
+                </div>
+            ) : null}
 
             {session.active ? null : (
                 <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">

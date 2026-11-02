@@ -1159,6 +1159,10 @@ const sessionFilesRoute = createRoute({
 const sessionTerminalRoute = createRoute({
     getParentRoute: () => sessionDetailRoute,
     path: 'terminal',
+    validateSearch: (search: Record<string, unknown>): { native?: boolean; local?: boolean } => ({
+        ...(search.native === true || search.native === 'true' ? { native: true,
+            ...(search.local === true || search.local === 'true' ? { local: true } : {}) } : {})
+    }),
     component: TerminalPage,
 })
 

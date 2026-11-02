@@ -10,7 +10,9 @@ export const TerminalOpenPayloadSchema = z.object({
     sessionId: z.string().min(1),
     terminalId: z.string().min(1),
     cols: z.number().int().positive(),
-    rows: z.number().int().positive()
+    rows: z.number().int().positive(),
+    nativeCli: z.boolean().optional(),
+    nativeCliContext: z.enum(['session', 'local']).optional()
 })
 
 export type TerminalOpenPayload = z.infer<typeof TerminalOpenPayloadSchema>

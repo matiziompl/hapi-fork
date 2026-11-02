@@ -1,5 +1,6 @@
 import { logger } from '@/ui/logger'
 import { getInvokedCwd } from '@/utils/invokedCwd'
+import { killProcessTreeByPid } from '@/utils/process'
 import type {
     TerminalErrorPayload,
     TerminalExitPayload,
@@ -12,7 +13,17 @@ type TerminalRuntime = TerminalSession & {
     proc: Bun.Subprocess
     terminal: Bun.Terminal
     idleTimer: ReturnType<typeof setTimeout> | null
+    nativeCli: boolean
+    context: 'session' | 'local'
+    stopNative?: () => void
 }
+
+export type NativeTerminalLaunch = {
+    command: string[]
+    env?: NodeJS.ProcessEnv
+    onExit?: () => void
+}
+export type NativeTerminalLauncher = (signal: AbortSignal, context: 'session' | 'local') => Promise<NativeTerminalLaunch>
 
 type TerminalManagerOptions = {
     sessionId: string
@@ -23,12 +34,14 @@ type TerminalManagerOptions = {
     onError: (payload: TerminalErrorPayload) => void
     idleTimeoutMs?: number
     maxTerminals?: number
+    prepareNativeCli?: NativeTerminalLauncher
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
 const DEFAULT_MAX_TERMINALS = 4
 const SENSITIVE_ENV_KEYS = new Set([
     'CLI_API_TOKEN',
+    'HAPI_CODEX_REMOTE_TOKEN',
     'HAPI_API_URL',
     'HAPI_HTTP_MCP_URL',
     'TELEGRAM_BOT_TOKEN',
@@ -153,6 +166,8 @@ export class TerminalManager {
     private readonly maxTerminals: number
     private readonly terminals: Map<string, TerminalRuntime> = new Map()
     private readonly filteredEnv: NodeJS.ProcessEnv
+    private readonly prepareNativeCli?: NativeTerminalLauncher
+    private readonly preparing = new Map<string, AbortController>()
 
     constructor(options: TerminalManagerOptions) {
         this.sessionId = options.sessionId
@@ -164,11 +179,16 @@ export class TerminalManager {
         this.idleTimeoutMs = options.idleTimeoutMs ?? resolveEnvNumber('HAPI_TERMINAL_IDLE_TIMEOUT_MS', DEFAULT_IDLE_TIMEOUT_MS)
         this.maxTerminals = options.maxTerminals ?? resolveEnvNumber('HAPI_TERMINAL_MAX_TERMINALS', DEFAULT_MAX_TERMINALS)
         this.filteredEnv = buildFilteredEnv()
+        this.prepareNativeCli = options.prepareNativeCli
     }
 
-    create(terminalId: string, cols: number, rows: number): void {
+    async create(terminalId: string, cols: number, rows: number, nativeCli = false, context: 'session' | 'local' = 'session'): Promise<void> {
         const existing = this.terminals.get(terminalId)
         if (existing) {
+            if (existing.nativeCli !== nativeCli || existing.context !== context) {
+                this.emitError(terminalId, 'Terminal type cannot change on reconnect.')
+                return
+            }
             existing.cols = cols
             existing.rows = rows
             existing.terminal.resize(cols, rows)
@@ -177,7 +197,8 @@ export class TerminalManager {
             return
         }
 
-        if (this.terminals.size >= this.maxTerminals) {
+        if (this.preparing.has(terminalId)) return
+        if (this.terminals.size + this.preparing.size >= this.maxTerminals) {
             this.emitError(terminalId, `Too many terminals open (max ${this.maxTerminals}).`)
             return
         }
@@ -191,11 +212,28 @@ export class TerminalManager {
         const sessionPath = this.getSessionPath() ?? getInvokedCwd()
         const shellCommand = resolveShellCommand()
         const decoder = new TextDecoder()
+        let launch: NativeTerminalLaunch | undefined
+        const controller = new AbortController()
+        this.preparing.set(terminalId, controller)
+        let released = false
+        let stopTask: Promise<boolean> | undefined
+        let processExited = false
+        const release = () => {
+            if (released) return
+            released = true
+            launch?.onExit?.()
+        }
 
         try {
-            const proc = bun.spawn(shellCommand, {
+            if (nativeCli) {
+                if (!this.prepareNativeCli) throw new Error('Native CLI terminal is unavailable. Update the HAPI Runner and reopen the session.')
+                launch = await this.prepareNativeCli(controller.signal, context)
+                if (controller.signal.aborted) { release(); return }
+                if (!launch.command.length) throw new Error('Native CLI returned no executable.')
+            }
+            const proc = bun.spawn(launch?.command ?? shellCommand, {
                 cwd: sessionPath,
-                env: this.filteredEnv,
+                env: { ...this.filteredEnv, ...launch?.env },
                 terminal: {
                     cols,
                     rows,
@@ -210,12 +248,13 @@ export class TerminalManager {
                         }
                     },
                     exit: (terminal, exitCode) => {
-                        if (exitCode === 1) {
+                        if (exitCode === 1 && !processExited && !stopTask) {
                             this.emitError(terminalId, 'Terminal stream closed unexpectedly.')
                         }
                     }
                 },
                 onExit: (subprocess, exitCode) => {
+                    processExited = true
                     const signal = subprocess.signalCode ?? null
                     this.onExit({
                         sessionId: this.sessionId,
@@ -223,7 +262,11 @@ export class TerminalManager {
                         code: exitCode ?? null,
                         signal
                     })
-                    this.cleanup(terminalId)
+                    this.cleanup(terminalId, true)
+                    void (stopTask ?? Promise.resolve(true)).then(verified => {
+                        if (verified) release()
+                        else this.emitError(terminalId, 'Native CLI process-tree shutdown could not be verified. Chat delivery remains paused; inspect the Runner before reopening this session.')
+                    })
                 }
             })
 
@@ -235,6 +278,7 @@ export class TerminalManager {
                     logger.debug('[TERMINAL] Failed to kill process after missing terminal', { error })
                 }
                 this.emitError(terminalId, 'Failed to attach terminal.')
+                // A successfully spawned child keeps the lease until onExit.
                 return
             }
 
@@ -244,20 +288,29 @@ export class TerminalManager {
                 rows,
                 proc,
                 terminal,
-                idleTimer: null
+                idleTimer: null,
+                nativeCli,
+                context,
+                ...(nativeCli ? { stopNative: () => {
+                    stopTask ??= killProcessTreeByPid(proc.pid).catch(() => false)
+                    void stopTask.then(() => { try { terminal.close() } catch { /* Already closed. */ } })
+                } } : {})
             }
 
             this.terminals.set(terminalId, runtime)
             this.markActivity(runtime)
             this.onReady({ sessionId: this.sessionId, terminalId })
         } catch (error) {
+            release()
             logger.debug('[TERMINAL] Failed to spawn terminal', { error })
             const message = process.platform === 'win32'
                 && error instanceof Error
                 && error.message.includes('terminal option is not supported')
                 ? 'Remote terminal on Windows requires Bun 1.3.14 or newer.'
-                : 'Failed to spawn terminal.'
+                : error instanceof Error ? error.message : 'Failed to spawn terminal.'
             this.emitError(terminalId, message)
+        } finally {
+            if (this.preparing.get(terminalId) === controller) this.preparing.delete(terminalId)
         }
     }
 
@@ -283,10 +336,12 @@ export class TerminalManager {
     }
 
     close(terminalId: string): void {
+        this.preparing.get(terminalId)?.abort()
         this.cleanup(terminalId)
     }
 
     closeAll(): void {
+        for (const controller of this.preparing.values()) controller.abort()
         for (const terminalId of this.terminals.keys()) {
             this.cleanup(terminalId)
         }
@@ -311,18 +366,23 @@ export class TerminalManager {
         }, this.idleTimeoutMs)
     }
 
-    private cleanup(terminalId: string): void {
+    private cleanup(terminalId: string, exited = false): void {
         const runtime = this.terminals.get(terminalId)
         if (!runtime) {
             return
         }
 
-        this.terminals.delete(terminalId)
         if (runtime.idleTimer) {
             clearTimeout(runtime.idleTimer)
         }
 
-        if (!runtime.proc.killed && runtime.proc.exitCode === null) {
+        if (!exited && runtime.stopNative && runtime.proc.exitCode === null) {
+            runtime.stopNative()
+            return
+        }
+        this.terminals.delete(terminalId)
+
+        if (!exited && !runtime.proc.killed && runtime.proc.exitCode === null) {
             try {
                 runtime.proc.kill()
             } catch (error) {

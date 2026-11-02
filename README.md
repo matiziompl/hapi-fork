@@ -270,6 +270,7 @@ For self-hosted options (Cloudflare Tunnel, Tailscale), see [Installation](docs/
 - [Web / PWA](docs/guide/pwa.md)
 - [How it Works](docs/guide/how-it-works.md)
 - [Supported Agents](docs/guide/agents.md)
+- [AGY / Codex commands and skills in this fork](docs/guide/native-cli-commands.md)
 - [Voice Assistant](docs/guide/voice-assistant.md)
 - [Why HAPI](docs/guide/why-hapi.md)
 - [FAQ](docs/guide/faq.md)
@@ -298,5 +299,5 @@ bun run build:single-exe
 HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
 
 <!-- hapi-fork-version:start -->
-Current fork version: **v1.12**
+Current fork version: **v1.13**
 <!-- hapi-fork-version:end -->

@@ -90,6 +90,8 @@ import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
+import { findNativeCliCommand } from '@hapi/protocol/slashCommands'
+import { saveNativeCommandDraft } from '@/lib/nativeCommands'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
@@ -943,6 +945,7 @@ function SessionChatInner(props: SessionChatProps) {
         [props.api, props.session.id, scratchlist],
     )
 
+    const [nativeCommandError, setNativeCommandError] = useState<string | null>(null)
     const onSendForComposer = useCallback(
         async (
             text: string,
@@ -950,6 +953,19 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
         ): Promise<{ attemptId: string | null } | false> => {
+            const nativeCommand = !scratchlistMode && findNativeCliCommand(text, props.session.metadata?.flavor ?? '', props.availableSlashCommands)
+            if (nativeCommand) {
+                if (attachments?.length || scheduledAt != null) {
+                    setNativeCommandError(t('terminal.native.chatError'))
+                    return false
+                }
+                setNativeCommandError(null)
+                saveNativeCommandDraft(props.session.id, text.trim())
+                await navigate({ to: '/sessions/$sessionId/terminal', params: { sessionId: props.session.id },
+                    search: { native: true, ...(nativeCommand.nativeCliContext === 'local' ? { local: true } : {}) }, ...PRESERVE_SESSION_SIDEBAR_SCROLL })
+                return { attemptId: null }
+            }
+            setNativeCommandError(null)
             if (
                 scratchlistMode
                 && scheduledAt == null
@@ -1005,7 +1021,8 @@ function SessionChatInner(props: SessionChatProps) {
             }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode],
+        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients,
+            props.session.metadata?.flavor, props.availableSlashCommands, navigate, scratchlist, scratchlistMode, t],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     // The effort-options query is keyed by session only, so a stale option
@@ -2016,6 +2033,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
+            {nativeCommandError ? <div role="alert" className="px-3 py-2 text-sm text-[var(--app-badge-error-text)]">{nativeCommandError}</div> : null}
             <SessionHeader
                 session={props.session}
                 serviceTier={effectiveCodexServiceTier}
