@@ -716,7 +716,17 @@ function SessionPage() {
     } = useSlashCommands(api, sessionId, agentType)
     const {
         getSuggestions: getSkillSuggestions,
+        skills,
+        isLoading: skillsLoading,
+        error: skillsError,
+        refresh: refreshSkills,
     } = useSkills(api, sessionId)
+    const skillAutocompleteState = useMemo(() => ({
+        isLoading: skillsLoading,
+        error: skillsError,
+        hasSkills: skills.length > 0,
+        onRetry: refreshSkills,
+    }), [skillsLoading, skillsError, skills.length, refreshSkills])
     // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
     const { sessions: allSessions } = useSessions(api)
     const { machines: mentionMachines } = useMachines(api, true)
@@ -878,6 +888,7 @@ function SessionPage() {
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
+            skillAutocompleteState={skillAutocompleteState}
             availableSlashCommands={slashCommands}
             sendError={sendError}
             onClearSendError={clearSendError}

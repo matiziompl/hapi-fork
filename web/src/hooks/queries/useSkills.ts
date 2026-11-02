@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { SkillSummary } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
@@ -29,9 +29,11 @@ export function useSkills(
     skills: SkillSummary[]
     isLoading: boolean
     error: string | null
+    refresh: () => void
     getSuggestions: (query: string) => Promise<Suggestion[]>
 } {
     const resolvedSessionId = sessionId ?? 'unknown'
+    const lastRefresh = useRef<{ sessionId: string; at: number } | null>(null)
 
     const query = useQuery({
         queryKey: queryKeys.skills(resolvedSessionId),
@@ -46,10 +48,7 @@ export function useSkills(
             return response
         },
         enabled: Boolean(api && sessionId),
-        // Skills change only when the user edits files on the machine, so
-        // polling them on a timer just burns relay bandwidth on an answer
-        // that is almost always identical. getSuggestions() refetches when
-        // the user actually types "$", which is the moment freshness matters.
+        // Refresh on picker use instead of polling idle sessions.
         staleTime: 5 * 60_000,
         refetchOnWindowFocus: true,
         gcTime: 30 * 60 * 1000,
@@ -63,11 +62,21 @@ export function useSkills(
         return []
     }, [query.data])
 
+    const refresh = useCallback(() => {
+        if (!api || !sessionId) return
+        lastRefresh.current = { sessionId, at: Date.now() }
+        // Share an initial/in-flight request; keep cached rows visible meanwhile.
+        void query.refetch({ cancelRefetch: false })
+    }, [api, sessionId, query.refetch])
+
     const getSuggestions = useCallback(async (queryText: string): Promise<Suggestion[]> => {
-        // Fire-and-forget for the same reason as useSlashCommands: the RPC can
-        // stall behind a wedged CLI, and the menu must not block on it.
-        if (queryText === '$') {
-            void query.refetch()
+        // A pasted/restored prefix may never pass through the bare "$" state.
+        // Limit requests while typing or receiving a refreshed catalog.
+        if (queryText.startsWith('$') && (
+            lastRefresh.current?.sessionId !== sessionId
+            || Date.now() - lastRefresh.current.at >= 30_000
+        )) {
+            refresh()
         }
         const currentSkills = skills
         const recent = getRecentSkills()
@@ -111,12 +120,13 @@ export function useSkills(
                 description: skill.description,
                 source: 'builtin'
             }))
-    }, [query.refetch, skills])
+    }, [refresh, sessionId, skills])
 
     return {
         skills,
-        isLoading: query.isLoading,
+        isLoading: query.isFetching,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load skills' : null,
+        refresh,
         getSuggestions,
     }
 }

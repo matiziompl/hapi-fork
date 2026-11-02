@@ -48,7 +48,7 @@ import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
-import { Autocomplete } from '@/components/ChatInput/Autocomplete'
+import { Autocomplete, type SkillAutocompleteState } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import {
     ComposerButtons,
@@ -347,6 +347,7 @@ export function HappyComposer(props: {
     terminalUnsupported?: boolean
     autocompletePrefixes?: string[]
     autocompleteSuggestions?: SuggestionHandler
+    skillAutocompleteState?: SkillAutocompleteState
     // Voice assistant props
     voiceStatus?: ConversationStatus
     voiceMicMuted?: boolean
@@ -928,11 +929,14 @@ export function HappyComposer(props: {
     const isIOSPWA = isIOS && isStandalone
     const bottomPaddingClass = isIOSPWA ? 'pb-0' : 'pb-3'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
-    const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
+    const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions, suggestionsOpen] = useActiveSuggestions(
         activeWord,
         autocompleteSuggestions,
         { clampSelection: true, wrapAround: true }
     )
+    const skillAutocompleteState = suggestionsOpen && activeWord?.startsWith('$')
+        ? props.skillAutocompleteState
+        : undefined
 
     const haptic = useCallback((type: 'light' | 'success' | 'error' = 'light') => {
         if (type === 'light') {
@@ -1458,7 +1462,7 @@ export function HappyComposer(props: {
             }
             const action = getComposerEscapeAction({
                 showSettings,
-                hasSuggestions: suggestions.length > 0,
+                hasSuggestions: suggestions.length > 0 || Boolean(skillAutocompleteState),
                 threadIsRunning,
                 isExpanded,
             })
@@ -1484,6 +1488,7 @@ export function HappyComposer(props: {
         }
     }, [
         suggestions,
+        skillAutocompleteState,
         selectedIndex,
         moveUp,
         moveDown,
@@ -2264,7 +2269,7 @@ export function HappyComposer(props: {
             )
         }
 
-        if (suggestions.length > 0) {
+        if (suggestions.length > 0 || skillAutocompleteState) {
             return (
                 <div className={`${overlayPositionClass} w-full`}>
                     <FloatingOverlay>
@@ -2272,6 +2277,7 @@ export function HappyComposer(props: {
                             suggestions={suggestions}
                             selectedIndex={selectedIndex}
                             onSelect={(index) => handleSuggestionSelect(index)}
+                            skillState={skillAutocompleteState}
                         />
                     </FloatingOverlay>
                 </div>
@@ -2309,6 +2315,7 @@ export function HappyComposer(props: {
         claudeEffortOptions,
         fastModeOptions,
         suggestions,
+        skillAutocompleteState,
         selectedIndex,
         controlsDisabled,
         collaborationMode,

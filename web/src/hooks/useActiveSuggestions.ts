@@ -88,7 +88,7 @@ interface SuggestionRequest {
 
 /**
  * Hook that manages autocomplete suggestions based on an active word query
- * Returns: [suggestions, selectedIndex, moveUp, moveDown]
+ * Returns: [suggestions, selectedIndex, moveUp, moveDown, clear, isOpen]
  */
 export function useActiveSuggestions(
     query: string | null,
@@ -184,10 +184,12 @@ export function useActiveSuggestions(
 
     const generationRef = useRef(0)
     const abortRef = useRef<AbortController | null>(null)
+    const dismissedQueryRef = useRef<{ query: string | null } | null>(null)
 
     const clear = useCallback(() => {
         generationRef.current += 1
         abortRef.current?.abort()
+        dismissedQueryRef.current = { query: latestInputRef.current.query }
         setState({ suggestions: [], selected: -1, input: null })
     }, [])
 
@@ -251,6 +253,10 @@ export function useActiveSuggestions(
     }, [clampSelection, autoSelectFirst, allowEmptyQuery])
 
     useEffect(() => {
+        // Catalog hydration can replace the handler after Escape. Reopen only
+        // when the user changes the query, rather than when that RPC completes.
+        if (dismissedQueryRef.current?.query === query) return
+        dismissedQueryRef.current = null
         abortRef.current?.abort()
         const generation = ++generationRef.current
         const latestInput = latestInputRef.current
@@ -279,10 +285,10 @@ export function useActiveSuggestions(
 
     // Hide published suggestions as soon as a new input renders. Keep the old state
     // internally so the replacement result can still preserve selection by key.
-    if (query === null || (!allowEmptyQuery && query === '') || !stateMatchesInput) {
-        return [[], -1, moveUp, moveDown, clear] as const
+    if (query === null || (!allowEmptyQuery && query === '') || !stateMatchesInput || dismissedQueryRef.current?.query === query) {
+        return [[], -1, moveUp, moveDown, clear, false] as const
     }
 
     // Return state suggestions
-    return [state.suggestions, state.selected, moveUp, moveDown, clear] as const
+    return [state.suggestions, state.selected, moveUp, moveDown, clear, true] as const
 }

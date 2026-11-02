@@ -709,6 +709,11 @@ export default {
 
   // Composer buttons
   'composer.settings': 'Settings',
+  'composer.skillsLoading': 'Loading skills…',
+  'composer.skillsLoadFailed': 'Could not load skills.',
+  'composer.skillsNoMatches': 'No matching skills. Type $ to see all skills.',
+  'composer.skillsEmpty': 'No skills available in this session.',
+  'composer.skillsReload': 'Reload skills',
   'composer.terminal': 'Terminal',
   'composer.abort': 'Abort',
   'composer.switchRemote': 'Switch to remote mode',

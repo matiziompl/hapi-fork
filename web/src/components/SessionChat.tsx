@@ -21,6 +21,7 @@ import type {
 } from '@/types/api'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { SuggestionHandler, Suggestion } from '@/hooks/useActiveSuggestions'
+import type { SkillAutocompleteState } from '@/components/ChatInput/Autocomplete'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
@@ -628,6 +629,7 @@ type SessionChatProps = {
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: SuggestionHandler
+    skillAutocompleteState?: SkillAutocompleteState
     availableSlashCommands?: readonly SlashCommand[]
     // The latest send the hub rejected (4xx/5xx/network).  When set, the
     // composer is asked to restore the typed text and surface an inline
@@ -2385,6 +2387,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
                         terminalUnsupported={props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
+                        skillAutocompleteState={props.skillAutocompleteState}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}
                         onVoiceToggle={voice && voiceBackendReady ? handleVoiceToggle : undefined}

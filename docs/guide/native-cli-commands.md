@@ -22,6 +22,20 @@ $skill-creator Create a skill for this repository.
 Use $plugin:build and $review to check the change.
 ```
 
+Type a partial name such as `$pony` to preview all matching skills, including
+plugin names such as `$ponytail:ponytail-general` and `$ponytail:ponytail-review`.
+Each row shows the full reference and its description; the selected skill's
+description expands in full. Use the arrow keys and Enter/Tab, or click a row,
+to insert its complete reference. A bare `$` lists all available skills.
+
+The picker refreshes even when a prefix is pasted or restored directly. Cached
+previews remain available during refresh. Loading, an empty catalog, no matches
+and discovery failures have separate messages; **Reload skills** retries a failed
+or empty catalog. Escape dismisses the picker even if discovery is still pending.
+The list uses the active session's catalog; it does not invent aliases or skills
+that the session's agent cannot discover. These picker refinements ship in v1.14
+and do not require an additional Runner change beyond the v1.13 integration.
+
 `$[skill-name]` is also accepted. HAPI obtains enabled skills and their real
 paths from the current shared Codex app-server's `skills/list`, including plugin
 skills. References become structured native skill inputs before entering the
