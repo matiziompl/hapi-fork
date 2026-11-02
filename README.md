@@ -35,6 +35,12 @@ bash "$HOME/workspace/hapi/scripts/update-from-workspace.sh" \
   "$HOME/workspace/hapi" "$HOME/docker/hapi"
 ```
 
+Every handoff includes the complete invocation. If the operator does not have
+the script, the agent also supplies its current contents and a command to save
+it, for example at `~/update-from-workspace.sh` outside the source repository.
+If the script is unsuitable for an update, the handoff supplies the complete
+equivalent Bash commands with the same preflight and data protections.
+
 The script checks the source repository and required files before stopping
 Compose. It copies the complete set of tracked source files and `.git`, then
 rebuilds/starts the Hub. Destination `data/`, `.env` and other untracked local
@@ -292,5 +298,5 @@ bun run build:single-exe
 HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
 
 <!-- hapi-fork-version:start -->
-Current fork version: **v1.11**
+Current fork version: **v1.12**
 <!-- hapi-fork-version:end -->
