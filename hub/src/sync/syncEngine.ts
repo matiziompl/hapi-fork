@@ -1187,6 +1187,7 @@ export class SyncEngine {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
+            promptPrefix?: string
         }
     ): Promise<void> {
         if (this.historyActionsInFlight.has(sessionId)) {
@@ -4523,6 +4524,10 @@ export class SyncEngine {
                 this.rpcGateway.readWorkspaceFile(machineId, { cwd, path, ...options })
             )
         }
+    }
+
+    async listAgentProfiles(sessionId: string, flavor: string, cwd: string) {
+        return this.rpcGateway.listAgentProfiles(sessionId, flavor, cwd)
     }
 
     async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {

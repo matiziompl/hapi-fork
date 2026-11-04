@@ -549,6 +549,15 @@ describe('ComposerButtons agent status', () => {
         /></RuntimeProviders>
     }
 
+    it('lets personas be hidden while keeping the agent selector outside the scrolling toolbar', () => {
+        localStorage.setItem('hapi-composer-toolbar-layout', JSON.stringify({
+            mode: 'left', left: ['attachment'], right: [], hidden: ['personas'],
+        }))
+        render(toolbar({ personaControl: <button type="button">Personas</button>, agentControl: <button type="button">Agent</button> }))
+        expect(screen.queryByRole('button', { name: 'Personas' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Agent' }).closest('[data-testid="composer-toolbar-items"]')).toBeNull()
+    })
+
     it('opens status independently of sending the current draft and blocks duplicate clicks while pending', () => {
         const onStatus = vi.fn()
         const onSend = vi.fn()

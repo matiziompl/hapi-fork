@@ -994,6 +994,50 @@ describe('MessageService.cancelQueuedMessage — future-scheduled message', () =
 // sendMessage with scheduledAt
 // ---------------------------------------------------------------------------
 
+describe('MessageService prompt profiles', () => {
+    it('keeps web text unchanged and delivers the same prefix once on live send, retry and reconnect', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'persona-live')
+        const updates: any[] = []
+        const io = { of: () => ({ to: () => ({ emit: (_event: string, value: unknown) => updates.push(value) }) }) } as unknown as Server
+        const service = new MessageService(store, io, makePublisher() as unknown as EventPublisher)
+        const expected = '<hapi-profile id="persona-1">\nPersona: Reviewer\nReview.\n\n</hapi-profile>\n\nmy prompt'
+        await service.sendMessage(session.id, { text: 'my prompt', localId: 'persona-1', promptPrefix: 'Persona: Reviewer\nReview.\n\n' })
+        expect(updates[0].body.message.content.content.text).toBe(expected)
+        expect((service.getMessages(session.id)[0]!.content as any).content.text).toBe('my prompt')
+        await service.sendMessage(session.id, { text: 'my prompt', localId: 'persona-1', promptPrefix: 'CHANGED' })
+        expect(updates[1].body.message.content.content.text).toBe(expected)
+        const replay = service.getDeliverableMessagesAfter(session.id, { afterSeq: 0, limit: 50, now: Date.now() })
+        expect((replay[0]!.content as any).content.text).toBe(expected)
+        await service.sendMessage(session.id, { text: '$review find bugs', localId: 'skill-profile', promptPrefix: 'Review carefully.\n\n' })
+        expect(updates[2].body.message.content.content.text).toBe('$review <hapi-profile id="skill-profile">\nReview carefully.\n\n</hapi-profile>\n\nfind bugs')
+        store.messages.syncNativeQueuedMessage(session.id, 'skill-profile', updates[2].body.message.content.content.text)
+        expect((store.messages.getMessageByLocalId(session.id, 'skill-profile')!.content as any).content.text).toBe('$review find bugs')
+        await service.sendMessage(session.id, { text: '$review', localId: 'bare-skill-profile', promptPrefix: 'Review carefully.\n\n' })
+        store.messages.syncNativeQueuedMessage(session.id, 'bare-skill-profile', updates[3].body.message.content.content.text)
+        expect((store.messages.getMessageByLocalId(session.id, 'bare-skill-profile')!.content as any).content.text).toBe('$review')
+        store.close()
+    })
+
+    it('snapshots profiles for scheduled messages and does not reveal them through native queue mirrors', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'persona-scheduled')
+        const updates: any[] = []
+        const io = { of: () => ({ to: () => ({ emit: (_event: string, value: unknown) => updates.push(value) }) }) } as unknown as Server
+        const service = new MessageService(store, io, makePublisher() as unknown as EventPublisher)
+        await service.sendMessage(session.id, { text: 'later', localId: 'persona-2', promptPrefix: 'Act as a reviewer.\n\n', scheduledAt: Date.now() + 1000 })
+        expect(updates).toHaveLength(0)
+        const replay = service.getDeliverableMessagesAfter(session.id, { afterSeq: 0, limit: 50, now: Date.now() + 2000 })
+        const wire = '<hapi-profile id="persona-2">\nAct as a reviewer.\n\n</hapi-profile>\n\nlater'
+        expect((replay[0]!.content as any).content.text).toBe(wire)
+        store.messages.syncNativeQueuedMessage(session.id, 'persona-2', wire + ' edited')
+        expect((service.getMessages(session.id)[0]!.content as any).content.text).toBe('later edited')
+        const edited = service.getDeliverableMessagesAfter(session.id, { afterSeq: 0, limit: 50, now: Date.now() + 2000 })
+        expect((edited[0]!.content as any).content.text).toBe(wire + ' edited')
+        store.close()
+    })
+})
+
 describe('MessageService.sendMessage with scheduledAt', () => {
     function makeNoopIo(): Server {
         let emittedUpdates: unknown[] = []

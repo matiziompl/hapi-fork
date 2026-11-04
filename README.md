@@ -299,5 +299,5 @@ bun run build:single-exe
 HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
 
 <!-- hapi-fork-version:start -->
-Current fork version: **v1.14**
+Current fork version: **v1.15**
 <!-- hapi-fork-version:end -->

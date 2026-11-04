@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test'
-import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, contentWithPromptProfile } from '@hapi/protocol'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -26,6 +26,44 @@ class FakeSocket {
         this.handlers.get(event)?.(data, ack)
     }
 }
+
+it('hides correlated Claude profile echoes and removes profile snapshots from batched AGY abort restores', () => {
+    const store = new Store(':memory:')
+    const session = store.sessions.getOrCreateSession('profile-return', {}, null, 'default')
+    const socket = new FakeSocket()
+    const events: SyncEvent[] = []
+    registerSessionHandlers(socket as unknown as CliSocketWithData, {
+        store, resolveSessionAccess: () => ({ ok: true, value: session }), emitAccessError() {},
+        onWebappEvent: event => events.push(event),
+    })
+    const wire: string[] = []
+    for (const [id, text] of [['first/id', 'First prompt'], ['second', 'Second prompt'], ['unicode-\ud800', 'Unicode prompt'], ['skill', '$review find bugs'], ['bare-skill', '$review']]) {
+        const content = { role: 'user', content: { type: 'text', text }, meta: { sentFrom: 'webapp', hapiPromptPrefix: 'Persona: Reviewer\nPrivate instructions.\n\n', hapiPromptId: id } }
+        store.messages.addMessage(session.id, content, id)
+        wire.push((contentWithPromptProfile(content) as typeof content).content.text!)
+    }
+    socket.trigger('message', { sid: session.id, message: { role: 'user', content: { type: 'text', text: wire[0] }, meta: { sentFrom: 'cli', isTranscriptEcho: true } } })
+    expect(store.messages.getAllMessages(session.id)).toHaveLength(5)
+    expect(events).toHaveLength(0)
+    socket.trigger('message', { sid: session.id, message: { role: 'agent', content: { type: 'event', data: { type: 'abort-restore', text: wire.join('\n\n') } } } })
+    const last = store.messages.getAllMessages(session.id).at(-1)!.content as { content: { data: { text: string } } }
+    expect(last.content.data.text).toBe('First prompt\n\nSecond prompt\n\nUnicode prompt\n\n$review find bugs\n\n$review')
+    expect(JSON.stringify(events)).not.toContain('Private instructions')
+    const literal = '<hapi-profile id="unknown">\nUser example\n</hapi-profile>\n\nKeep me'
+    socket.trigger('message', { sid: session.id, message: { role: 'user', content: { type: 'text', text: literal }, meta: { sentFrom: 'cli' } } })
+    expect((store.messages.getAllMessages(session.id).at(-1)!.content as { content: { text: string } }).content.text).toBe(literal)
+    store.messages.deleteQueuedMessageById(session.id, 'first/id')
+    const eventCount = events.length
+    socket.trigger('message', { sid: session.id, message: { role: 'user', content: { type: 'text', text: wire[0] }, meta: { sentFrom: 'cli', isTranscriptEcho: true } } })
+    expect(events).toHaveLength(eventCount)
+    socket.trigger('message', { sid: session.id, message: { role: 'agent', content: { type: 'event', data: { type: 'abort-restore', text: wire[0] } } } })
+    const unavailable = store.messages.getAllMessages(session.id).at(-1)!.content as { content: { data: { type: string; message: string; text?: string } } }
+    expect(unavailable.content.data.type).toBe('message')
+    expect(unavailable.content.data.message).toContain('draft was left unchanged')
+    expect(unavailable.content.data).not.toHaveProperty('text')
+    expect(JSON.stringify(events)).not.toContain('Private instructions')
+    store.close()
+})
 
 it('does not rebroadcast stored messages and retains repeated consumption acknowledgements', () => {
     const store = new Store(':memory:')

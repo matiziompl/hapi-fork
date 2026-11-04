@@ -10,6 +10,7 @@ import { Children, isValidElement, useRef, useState, type ReactElement, type Rea
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
 import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
+import { PersonaIcon } from './PromptProfiles'
 
 function ToolbarItemSlot(props: { item: ComposerToolbarItemId; children: ReactNode }) {
     return <>{props.children}</>
@@ -413,6 +414,7 @@ export function ComposerToolbarItemPreview(props: { item: ComposerToolbarItemId;
             case 'scratchlist': return <ScratchlistToggleIcon />
             case 'schedule': return <ScheduleIcon className="h-[18px] w-[18px]" />
             case 'status': return <AgentStatusIcon />
+            case 'personas': return <PersonaIcon />
             case 'model':
             case 'effort':
                 return <><span className="max-w-24 truncate text-xs font-medium">{props.label}</span><ChevronIcon /></>
@@ -781,6 +783,8 @@ export function DictationButton(props: {
 
 export function ComposerButtons(props: {
     canSend: boolean
+    personaControl?: ReactNode
+    agentControl?: ReactNode
     onStatus?: () => void
     statusPending?: boolean
     statusDisabled?: boolean
@@ -874,6 +878,7 @@ export function ComposerButtons(props: {
                 style={{ justifyContent: toolbarJustifyContent }}
             >
                 <OrderedToolbarItems layout={effectiveLayout}>
+                <ToolbarItemSlot item="personas">{props.personaControl}</ToolbarItemSlot>
                 <ToolbarItemSlot item="attachment">
                 <ComposerPrimitive.AddAttachment
                     aria-label={t('composer.attach')}
@@ -1089,6 +1094,7 @@ export function ComposerButtons(props: {
                 </ToolbarItemSlot>
                 </OrderedToolbarItems>
             </div>
+            {props.agentControl}
 
             {/*
               Draft voice/dictate: compact circle in the toolbar row (under text).

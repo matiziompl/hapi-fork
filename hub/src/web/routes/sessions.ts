@@ -38,6 +38,7 @@ import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlist
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { copyPromptProfileSelection } from '../../config/promptProfiles'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -72,7 +73,7 @@ function estimateBase64Bytes(base64: string): number {
     return Math.floor((len * 3) / 4) - padding
 }
 
-export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null, dataDir?: string): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/sessions', (c) => {
@@ -229,6 +230,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: result.message, code: result.code }, status)
         }
 
+        if (dataDir) await copyPromptProfileSelection(dataDir, namespace, sessionResult.sessionId, result.sessionId)
         return c.json({ type: 'success', sessionId: result.sessionId })
     })
 
@@ -260,6 +262,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: result.message, code: result.code }, status)
         }
 
+        if (dataDir) await copyPromptProfileSelection(dataDir, namespace, sessionResult.sessionId, result.sessionId)
         return c.json({
             ok: true,
             sessionId: result.sessionId,

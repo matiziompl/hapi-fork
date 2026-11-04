@@ -53,6 +53,7 @@ import type {
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { buildAgentStatusCommand } from './agentStatusProbe'
+import { discoverAgentProfiles } from './agentProfiles'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
@@ -494,6 +495,13 @@ export class RpcGateway {
             skills?: Array<{ name: string; description?: string }>
             error?: string
         }
+    }
+
+    async listAgentProfiles(sessionId: string, flavor: string, cwd: string) {
+        return discoverAgentProfiles(
+            command => this.sessionRpc(sessionId, RPC_METHODS.Bash, { command, timeout: 10_000 }, 15_000) as Promise<RpcCommandResponse>,
+            flavor, cwd,
+        )
     }
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {

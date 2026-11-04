@@ -13,6 +13,7 @@ import {
     deleteQueuedMessageById,
     claimIndeterminateMessage,
     lookupQueuedMessage,
+    getMessageByLocalId,
     getMessages,
     getFirstMessages,
     getDeliverableMessagesAfter,
@@ -193,6 +194,10 @@ export class MessageStore {
 
     lookupQueuedMessage(sessionId: string, messageId: string): LookupQueuedMessageResult {
         return lookupQueuedMessage(this.db, sessionId, messageId)
+    }
+
+    getMessageByLocalId(sessionId: string, localId: string): StoredMessage | null {
+        return getMessageByLocalId(this.db, sessionId, localId)
     }
 
     deleteQueuedMessageById(sessionId: string, messageId: string): boolean {

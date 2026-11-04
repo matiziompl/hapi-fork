@@ -12,6 +12,7 @@ import {
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type MutableRefObject,
+    type ReactNode,
     type SyntheticEvent as ReactSyntheticEvent,
     Fragment,
     useCallback,
@@ -291,6 +292,8 @@ export function ModelEffortSettingsSection(props: {
 }
 
 export function HappyComposer(props: {
+    personaControl?: ReactNode
+    agentControl?: ReactNode
     sessionId?: string
     focusInputRef?: MutableRefObject<(() => void) | null>
     onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
@@ -2540,6 +2543,8 @@ export function HappyComposer(props: {
 
                             <ComposerButtons
                                 canSend={canSend}
+                                personaControl={props.personaControl}
+                                agentControl={props.agentControl}
                                 onStatus={props.voiceTranscriptionApi && sessionId ? handleAgentStatus : undefined}
                                 statusPending={Boolean(statusRequest && statusRequest.sessionId === sessionId && statusRequest.pending)}
                                 statusDisabled={!active || disabled}

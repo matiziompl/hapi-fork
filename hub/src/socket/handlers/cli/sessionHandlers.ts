@@ -10,6 +10,7 @@ import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTasks } from '../../../sync/backgroundTasks'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
+import { normalizePromptProfileReturn } from '../../../sync/promptProfileReturns'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -143,7 +144,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const { sid, localId, createdAt } = parsed.data
         const raw = parsed.data.message
 
-        const content = typeof raw === 'string'
+        let content = typeof raw === 'string'
             ? (() => {
                 try {
                     return JSON.parse(raw) as unknown
@@ -159,6 +160,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
         const session = sessionAccess.value
+
+        content = normalizePromptProfileReturn(store, sid, content)
+        if (content === null) return
 
         if (isRedundantGoalStatusEventContent(content)) {
             return

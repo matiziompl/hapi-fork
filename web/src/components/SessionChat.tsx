@@ -89,6 +89,7 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+import { PersonaPicker, AgentProfilePicker } from '@/components/AssistantChat/PromptProfiles'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { findNativeCliCommand } from '@hapi/protocol/slashCommands'
@@ -2199,6 +2200,8 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <HappyComposer
+                        personaControl={<PersonaPicker key={`persona-${props.session.id}`} api={props.api} sessionId={props.session.id} />}
+                        agentControl={<AgentProfilePicker key={`agent-${props.session.id}`} api={props.api} sessionId={props.session.id} active={props.session.active} />}
                         focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}

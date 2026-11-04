@@ -13,6 +13,7 @@ export const COMPOSER_TOOLBAR_ITEM_IDS = [
     'scratchlist',
     'schedule',
     'status',
+    'personas',
 ] as const
 
 export type ComposerToolbarItemId = typeof COMPOSER_TOOLBAR_ITEM_IDS[number]

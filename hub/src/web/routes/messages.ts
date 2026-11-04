@@ -3,8 +3,9 @@ import { MessagesQuerySchema, QueuedStateRequestSchema, SendMessageRequestSchema
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { getPromptProfilePrefix } from '../../config/promptProfiles'
 
-export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null, dataDir?: string): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/sessions/:id/messages', async (c) => {
@@ -141,13 +142,18 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
+        // Slash commands must retain their native position at the start of input.
+        const prefix = dataDir && !/^\s*\/[\w.:-]+(?:\s|$)/.test(parsed.data.text)
+            ? await getPromptProfilePrefix(dataDir, c.get('namespace'), sessionId)
+            : ''
         await engine.sendMessage(sessionId, {
             text: parsed.data.text,
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
             sentFrom: 'webapp',
             scheduledAt: parsed.data.scheduledAt,
-            deliveryMode: parsed.data.deliveryMode
+            deliveryMode: parsed.data.deliveryMode,
+            ...(prefix ? { promptPrefix: prefix } : {}),
         })
         return c.json({ ok: true })
     })

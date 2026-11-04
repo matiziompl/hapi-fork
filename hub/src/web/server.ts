@@ -33,6 +33,7 @@ import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
 import { createHubSettingsRoutes } from './routes/hubSettings'
+import { createPromptProfilesRoutes } from './routes/promptProfiles'
 import { createWorkGraphRoutes } from './routes/workGraph'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -288,8 +289,9 @@ function createWebApp(options: {
 
     app.use('/api/*', createAuthMiddleware(options.jwtSecret))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
-    app.route('/api', createSessionsRoutes(options.getSyncEngine))
-    app.route('/api', createMessagesRoutes(options.getSyncEngine))
+    app.route('/api', createSessionsRoutes(options.getSyncEngine, configuration.dataDir))
+    app.route('/api', createMessagesRoutes(options.getSyncEngine, configuration.dataDir))
+    app.route('/api', createPromptProfilesRoutes(options.getSyncEngine, configuration.dataDir))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createStorageRoutes(configuration.dbPath))

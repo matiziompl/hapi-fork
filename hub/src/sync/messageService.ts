@@ -11,7 +11,7 @@ import {
     isRedundantGoalStatusEventContent,
     unwrapRoleWrappedRecordEnvelope
 } from '@hapi/protocol/messages'
-import { isObject } from '@hapi/protocol'
+import { contentWithPromptProfile, isObject } from '@hapi/protocol'
 import type { MessageDeliveryMode, MessagesResponse, QueuedStateResponse } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -150,6 +150,7 @@ export type RetryIndeterminateMessageResult =
     | { status: 'not-found' }
 
 function contentForDeferredDelivery(content: unknown): unknown {
+    content = contentWithPromptProfile(content)
     if (!isObject(content) || content.role !== 'user' || !isObject(content.meta)) {
         return content
     }
@@ -855,6 +856,7 @@ export class MessageService {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
+            promptPrefix?: string
         }
     ): Promise<{ actualSessionId: string; createdAt: number }> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
@@ -870,6 +872,7 @@ export class MessageService {
         }
 
         const sentFrom = payload.sentFrom ?? 'webapp'
+        const localId = payload.localId ?? randomUUID()
         const deliveryMode = getNormalizedDeliveryMode(
             this.store.sessions.getSession(sessionId)?.metadata,
             payload.deliveryMode,
@@ -885,7 +888,8 @@ export class MessageService {
             },
             meta: {
                 sentFrom,
-                deliveryMode
+                deliveryMode,
+                ...(payload.promptPrefix ? { hapiPromptPrefix: payload.promptPrefix, hapiPromptId: localId } : {})
             }
         }
 
@@ -895,7 +899,7 @@ export class MessageService {
         const inserted = this.store.addMessageForCurrentSession(
             sessionId,
             content,
-            payload.localId ?? randomUUID(),
+            localId,
             payload.scheduledAt ?? null
         )
         const actualSessionId = inserted.sessionId
@@ -905,7 +909,7 @@ export class MessageService {
         // provenance from a POST whose response was lost, so deliver the
         // duplicate through the same turn-safe deferred view as reconnect.
         const cliContent = inserted.inserted
-            ? msg.content
+            ? contentWithPromptProfile(msg.content)
             : contentForDeferredDelivery(msg.content)
         const shouldEmitToCli = msg.deliveryState !== 'indeterminate'
         this.onSessionActivity?.(actualSessionId, msg.createdAt)

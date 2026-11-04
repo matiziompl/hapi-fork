@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 
 import { getLiveReasoningStreamId } from '@hapi/protocol/messages'
+import { withoutPromptProfilePrefix } from '@hapi/protocol'
 
 import type { StoredMessage } from './types'
 import { decodeMessageContent, encodeMessageContent, truncateOversizedMessageContent } from './contentCodec'
@@ -190,7 +191,9 @@ export function syncNativeQueuedMessage(db: Database, sessionId: string, localId
         if (message.invokedAt !== null) return message
         // Native text edits must not erase Web attachments or origin metadata.
         const prior = z.object({ role: z.literal('user'), content: z.object({ type: z.literal('text') }).passthrough() }).passthrough().safeParse(message.content)
-        const content = prior.success ? { ...prior.data, content: { ...prior.data.content, text } } : initial
+        const content = prior.success
+            ? { ...prior.data, content: { ...prior.data.content, text: withoutPromptProfilePrefix(message.content, text) } }
+            : initial
         const encoded = encodeMessageContent(truncateOversizedMessageContent(content))
         prepareCached(db, 'UPDATE messages SET content = ? WHERE session_id = ? AND local_id = ? AND invoked_at IS NULL')
             .run(encoded, sessionId, localId)
@@ -848,6 +851,12 @@ export function lookupQueuedMessage(
     }
 
     return { status: 'queued' as const, localId: row.local_id, resolvedId: row.id, scheduledAt: row.scheduled_at }
+}
+
+export function getMessageByLocalId(db: Database, sessionId: string, localId: string): StoredMessage | null {
+    const row = prepareCached(db, 'SELECT * FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
+        .get(sessionId, localId) as DbMessageRow | undefined
+    return row ? toStoredMessage(row) : null
 }
 
 /** Delete a queued (invoked_at IS NULL) message by id or local_id.
