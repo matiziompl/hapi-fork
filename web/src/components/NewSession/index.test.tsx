@@ -220,7 +220,7 @@ vi.mock('@/components/PiSessionImportDialog', () => ({
         </>
     ) : null
 }))
-vi.mock('./DirectorySection', () => ({ DirectorySection: () => null }))
+vi.mock('./DirectorySection', () => ({ DirectorySection: (props: { onChooseFolder?: () => void }) => props.onChooseFolder ? <button type="button" data-testid="browse-folder" onClick={props.onChooseFolder}>browse</button> : null }))
 vi.mock('./MachineSelector', () => ({
     MachineSelector: (props: { machines: Machine[]; machineId: string | null; isDisabled: boolean; onChange: (machineId: string) => void }) => (
         <select
@@ -317,9 +317,74 @@ vi.mock('./ActionButtons', () => ({
 import { NewSession } from './index'
 
 const machine = { id: 'machine-1' } as Machine
-const api = {} as ApiClient
+const api = { listMachineAgentProfiles: vi.fn(async () => ({ agents: [] })) } as unknown as ApiClient
 
 describe('NewSession launch preferences', () => {
+    it('passes the selected conversation default to spawn', async () => {
+        savePreferredAgent('claude')
+        const profileApi = { listMachineAgentProfiles: vi.fn(async () => ({ agents: [{ id: 'reviewer', name: 'Reviewer', description: '', source: 'user' }] })) } as unknown as ApiClient
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-default' })
+        render(<NewSession api={profileApi} machines={[machine]} initialMachineId="machine-1" initialDirectory={'C:\\repo'} onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        await screen.findByRole('option', { name: 'Reviewer' })
+        fireEvent.change(screen.getByLabelText('composer.conversationDefault'), { target: { value: 'reviewer' } })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({ defaultAgentId: 'reviewer' })))
+    })
+
+    it('clears the conversation default when switching CLI or machine and does not resurrect it on return', async () => {
+        savePreferredAgent('claude')
+        const profileApi = { listMachineAgentProfiles: vi.fn(async () => ({ agents: [{ id: 'reviewer', name: 'Reviewer', description: '', source: 'user' }] })) } as unknown as ApiClient
+        render(<NewSession api={profileApi} machines={[machine, { id: 'machine-2' } as Machine]} initialMachineId="machine-1" initialDirectory={'C:\\repo'} onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        await screen.findByRole('option', { name: 'Reviewer' })
+        fireEvent.change(screen.getByLabelText('composer.conversationDefault'), { target: { value: 'reviewer' } })
+        fireEvent.click(screen.getByRole('radio', { name: 'Codex' }))
+        expect(screen.getByLabelText('composer.conversationDefault')).toHaveValue('')
+        fireEvent.click(screen.getByRole('radio', { name: 'Claude' }))
+        expect(screen.getByLabelText('composer.conversationDefault')).toHaveValue('')
+        await screen.findByRole('option', { name: 'Reviewer' })
+        fireEvent.change(screen.getByLabelText('composer.conversationDefault'), { target: { value: 'reviewer' } })
+        fireEvent.change(screen.getByLabelText('machine-selector'), { target: { value: 'machine-2' } })
+        expect(screen.getByLabelText('composer.conversationDefault')).toHaveValue('')
+        fireEvent.change(screen.getByLabelText('machine-selector'), { target: { value: 'machine-1' } })
+        expect(screen.getByLabelText('composer.conversationDefault')).toHaveValue('')
+    })
+
+    it('preserves the chosen profile through browsing back to the same workspace', async () => {
+        savePreferredAgent('claude')
+        const profileApi = { listMachineAgentProfiles: vi.fn(async () => ({ agents: [{ id: 'reviewer', name: 'Reviewer', description: '', source: 'user' }] })) } as unknown as ApiClient
+        const props = { api: profileApi, machines: [machine], initialMachineId: 'machine-1', initialDirectory: 'C:\\repo', onSuccess: mocks.onSuccess, onCancel: () => {}, onChooseFolder: vi.fn() }
+        const first = render(<NewSession {...props} />)
+        await screen.findByRole('option', { name: 'Reviewer' })
+        fireEvent.change(screen.getByLabelText('composer.conversationDefault'), { target: { value: 'reviewer' } })
+        fireEvent.click(screen.getByTestId('browse-folder'))
+        first.unmount()
+        render(<NewSession {...props} />)
+        await waitFor(() => expect(screen.getByLabelText('composer.conversationDefault')).toHaveValue('reviewer'))
+    })
+
+    it('opens the imported conversation and reports a default save failure without spawning again', async () => {
+        savePreferredAgent('pi')
+        const profileApi = {
+            listMachineAgentProfiles: vi.fn(async () => ({ agents: [{ id: 'reviewer', name: 'Reviewer', description: '', source: 'user' }] })),
+            getPiSessions: vi.fn().mockResolvedValue({ success: true, machineId: 'machine-1', sessions: [{ id: 'pi-native-1', title: 'Existing', cwd: 'C:\\repo', file: 'C:\\pi.jsonl', modifiedAt: 1, messageCount: 1 }] }),
+            importPiSessions: vi.fn().mockResolvedValue({ success: true, machineId: 'machine-1', results: [{ piSessionId: 'pi-native-1', hapiSessionId: 'imported', action: 'created', appended: 1 }] }),
+            reopenSession: vi.fn().mockResolvedValue({ ok: true, sessionId: 'imported', resumed: true }),
+            updatePromptProfile: vi.fn().mockRejectedValue(new Error('Save failed')),
+        } as unknown as ApiClient
+        render(<NewSession api={profileApi} machines={[machine]} initialMachineId="machine-1" initialDirectory={'C:\\repo'} onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        fireEvent.click(screen.getByRole('button', { name: 'piImport.inline.choose' }))
+        await waitFor(() => expect(screen.getByTestId('select-pi-history')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('select-pi-history'))
+        await screen.findByRole('option', { name: 'Reviewer' })
+        fireEvent.change(screen.getByLabelText('composer.conversationDefault'), { target: { value: 'reviewer' } })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('imported'))
+        expect(profileApi.updatePromptProfile).toHaveBeenCalledWith('imported', { defaultAgentId: 'reviewer' })
+        expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'newSession.agentProfileSaveFailed', sessionId: 'imported' }))
+        expect(profileApi.importPiSessions).toHaveBeenCalledTimes(1)
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
+    })
+
     beforeEach(() => {
         localStorage.clear()
         sessionStorage.clear()

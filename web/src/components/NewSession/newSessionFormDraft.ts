@@ -29,6 +29,7 @@ export type NewSessionFormDraft = {
     grokPermissionMode: GrokPermissionMode
     sessionType: SessionType
     worktreeName: string
+    defaultAgentChoice?: { scope: string; id: string }
 }
 
 export function saveNewSessionFormDraft(draft: NewSessionFormDraft): void {
@@ -93,7 +94,10 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
                 ? parsed.grokPermissionMode as GrokPermissionMode
                 : 'default',
             sessionType: (parsed.sessionType as SessionType | undefined) ?? 'simple',
-            worktreeName: typeof parsed.worktreeName === 'string' ? parsed.worktreeName : ''
+            worktreeName: typeof parsed.worktreeName === 'string' ? parsed.worktreeName : '',
+            ...(agentPreserved && typeof parsed.defaultAgentChoice?.scope === 'string' && typeof parsed.defaultAgentChoice?.id === 'string'
+                ? { defaultAgentChoice: { scope: parsed.defaultAgentChoice.scope, id: parsed.defaultAgentChoice.id } }
+                : {}),
         }
     } catch {
         return null

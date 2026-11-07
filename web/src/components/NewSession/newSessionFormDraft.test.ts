@@ -8,6 +8,25 @@ import {
 } from './newSessionFormDraft'
 
 describe('newSessionFormDraft', () => {
+    it('preserves a scoped default agent across folder navigation and drops malformed choices without losing the draft', () => {
+        saveNewSessionFormDraft({
+            agent: 'codex', model: 'custom-model', cursorSelectedBase: 'auto', machineId: 'machine-1',
+            effort: 'auto', modelReasoningEffort: 'default', serviceTier: 'standard',
+            collaborationMode: 'default', copilotAgentMode: 'interactive', yoloMode: false,
+            nativePermissionMode: 'default', grokPermissionMode: 'default', sessionType: 'simple', worktreeName: '',
+            defaultAgentChoice: { scope: JSON.stringify(['machine-1', 'codex', '/project']), id: 'reviewer' },
+        })
+        expect(shouldRestoreNewSessionFormDraft({ initialDirectory: '/project', initialMachineId: 'machine-1' })).toBe(true)
+        const restored = loadNewSessionFormDraft()!
+        expect(newSessionDraftMatchesMachine(restored, 'machine-1')).toBe(true)
+        expect(restored.defaultAgentChoice).toEqual({ scope: JSON.stringify(['machine-1', 'codex', '/project']), id: 'reviewer' })
+        for (const defaultAgentChoice of [null, 'reviewer', { scope: 7, id: 'reviewer' }, { scope: '/project', id: 7 }, {}]) {
+            sessionStorage.setItem('hapi:new-session-form-draft', JSON.stringify({ ...restored, defaultAgentChoice }))
+            expect(loadNewSessionFormDraft()).toMatchObject({ agent: 'codex', model: 'custom-model', machineId: 'machine-1' })
+            expect(loadNewSessionFormDraft()).not.toHaveProperty('defaultAgentChoice')
+        }
+    })
+
     it('drops Safe Yolo from a saved Codex draft without dropping other settings', () => {
         sessionStorage.setItem('hapi:new-session-form-draft', JSON.stringify({
             agent: 'codex', model: 'custom-model', nativePermissionMode: 'safe-yolo', yoloMode: true

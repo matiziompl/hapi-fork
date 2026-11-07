@@ -293,7 +293,7 @@ function createWebApp(options: {
     app.route('/api', createMessagesRoutes(options.getSyncEngine, configuration.dataDir))
     app.route('/api', createPromptProfilesRoutes(options.getSyncEngine, configuration.dataDir))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
-    app.route('/api', createMachinesRoutes(options.getSyncEngine))
+    app.route('/api', createMachinesRoutes(options.getSyncEngine, configuration.dataDir))
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir))
     app.route('/api', createUsageRoutes(options.store))

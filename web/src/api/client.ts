@@ -589,6 +589,11 @@ export class ApiClient {
         return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/agent-profiles`)
     }
 
+    async listMachineAgentProfiles(machineId: string, flavor: AgentFlavor, cwd: string): Promise<{ agents: AgentProfile[]; warning?: string }> {
+        const query = new URLSearchParams({ flavor, cwd })
+        return this.request(`/api/machines/${encodeURIComponent(machineId)}/agent-profiles?${query}`)
+    }
+
     async getQueuedState(sessionId: string, localIds: string[]): Promise<QueuedStateResponse> {
         return await this.request<QueuedStateResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/messages/queued-state`,
@@ -904,7 +909,8 @@ export class ApiClient {
         serviceTier?: 'fast' | 'standard',
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
-        startingMode?: 'remote' | 'pty'
+        startingMode?: 'remote' | 'pty',
+        defaultAgentId?: string
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
@@ -921,7 +927,8 @@ export class ApiClient {
                 serviceTier,
                 collaborationMode,
                 copilotAgentMode,
-                startingMode
+                startingMode,
+                defaultAgentId
             })
         })
     }

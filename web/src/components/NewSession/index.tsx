@@ -49,6 +49,7 @@ import { isOpencodeReasoningEffortValid } from './types'
 import type { AgentType, LaunchEffort, CodexReasoningEffort, NewSessionServiceTier, SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
+import { DefaultAgentSelector } from './DefaultAgentSelector'
 import { CollaborationModeSelector } from './CollaborationModeSelector'
 import { CodexImportActions } from './CodexImportActions'
 import { PiImportActions } from './PiImportActions'
@@ -112,6 +113,12 @@ export function NewSession(props: {
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
     const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
+    const [defaultAgentChoice, setDefaultAgentChoice] = useState<{ scope: string; id: string } | undefined>()
+    const defaultAgentScope = JSON.stringify([machineId, agent, directory.trim()])
+    const defaultAgentId = defaultAgentChoice?.scope === defaultAgentScope ? defaultAgentChoice.id : undefined
+    useEffect(() => {
+        if (defaultAgentChoice && defaultAgentChoice.scope !== defaultAgentScope) setDefaultAgentChoice(undefined)
+    }, [defaultAgentChoice, defaultAgentScope])
     // Snapshot taken once at mount, before any savePreferredAgent() call this
     // component makes can overwrite the stored agent. savePreferredAgent()
     // runs on every agent change (below), so reading loadPreferredAgent()
@@ -281,6 +288,7 @@ export function NewSession(props: {
         setGrokPermissionMode(draft.grokPermissionMode)
         setSessionType(draft.sessionType)
         setWorktreeName(draft.worktreeName)
+        setDefaultAgentChoice(draft.defaultAgentChoice)
         clearNewSessionFormDraft()
     }, [
         props.initialDirectory,
@@ -1640,7 +1648,8 @@ export function NewSession(props: {
             nativePermissionMode,
             grokPermissionMode,
             sessionType,
-            worktreeName
+            worktreeName,
+            defaultAgentChoice
         })
         props.onChooseFolder({ machineId, directory: trimmedDirectory })
     }, [
@@ -1662,6 +1671,7 @@ export function NewSession(props: {
         grokPermissionMode,
         sessionType,
         worktreeName,
+        defaultAgentChoice,
         trimmedDirectory
     ])
 
@@ -1708,6 +1718,16 @@ export function NewSession(props: {
     const handleDirectoryBlur = useCallback(() => {
         setIsDirectoryFocused(false)
     }, [])
+
+    const applyImportedDefault = async (sessionId: string) => {
+        if (!defaultAgentId) return
+        try {
+            await props.api.updatePromptProfile(sessionId, { defaultAgentId })
+        } catch {
+            // The imported session already exists; open it instead of offering a duplicate import.
+            addToast({ title: t('newSession.agentProfileSaveFailed'), body: '', sessionId, url: `/sessions/${sessionId}` })
+        }
+    }
 
     const handleDirectoryKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
         if (suggestions.length === 0) return
@@ -1845,6 +1865,7 @@ export function NewSession(props: {
                     clearNewSessionFormDraft()
                     setLastUsedMachineId(machineId)
                     addRecentPath(machineId, trimmedDirectory)
+                    await applyImportedDefault(resumedSessionId)
                     props.onSuccess(resumedSessionId)
                     return
                 }
@@ -1875,6 +1896,7 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
+                await applyImportedDefault(reopened.sessionId)
                 props.onSuccess(reopened.sessionId)
                 return
             }
@@ -1903,12 +1925,14 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
+                await applyImportedDefault(reopened.sessionId)
                 props.onSuccess(reopened.sessionId)
                 return
             }
 
             const result = await spawnSession({
                 machineId,
+                ...(defaultAgentId ? { defaultAgentId } : {}),
                 directory: trimmedDirectory,
                 agent,
                 model: resolvedModel,
@@ -2056,6 +2080,7 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled || agentAvailability.isLoading || Boolean(agentAvailability.error)}
                 onAgentChange={handleAgentChange}
             />
+            <DefaultAgentSelector api={props.api} machineId={machineId} flavor={agent} cwd={trimmedDirectory} directoryExists={pathExistence[trimmedDirectory]} value={defaultAgentId ?? ''} disabled={isFormDisabled} onChange={id => setDefaultAgentChoice(id ? { scope: defaultAgentScope, id } : undefined)} />
             {agentAvailability.isLoading ? (
                 <div className="px-3 py-2 text-xs text-[var(--app-hint)]">
                     {t('newSession.agentAvailabilityLoading')}

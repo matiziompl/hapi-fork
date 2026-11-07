@@ -693,6 +693,7 @@ export type QueuedStateResponse = {
 
 export const SpawnSessionRequestSchema = z.object({
     directory: z.string().min(1),
+    defaultAgentId: z.string().min(1).max(1000).optional(),
     agent: AgentFlavorSchema.optional(),
     model: z.string().optional(),
     effort: z.string().optional(),

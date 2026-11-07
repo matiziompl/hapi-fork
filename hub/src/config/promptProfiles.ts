@@ -5,7 +5,7 @@ import { getSettingsFile, readSettingsOrThrowCached, updateSettings } from './se
 export type SelectedAgentProfile = AgentProfile & { instruction: string }
 export type StoredPromptProfiles = {
     personas: Persona[]
-    sessions: Record<string, { personaId: string | null; agent: SelectedAgentProfile | null }>
+    sessions: Record<string, { personaId: string | null; agent: SelectedAgentProfile | null; defaultAgent?: SelectedAgentProfile | null }>
 }
 
 export class PromptProfileError extends Error {
@@ -27,6 +27,10 @@ function toState(profiles: StoredPromptProfiles, sessionId: string): PromptProfi
         personas: profiles.personas,
         personaId: selection.personaId,
         agent: agent ? { id: agent.id, name: agent.name, description: agent.description, source: agent.source } : null,
+        defaultAgent: selection.defaultAgent ? {
+            id: selection.defaultAgent.id, name: selection.defaultAgent.name,
+            description: selection.defaultAgent.description, source: selection.defaultAgent.source,
+        } : null,
     }
 }
 
@@ -52,7 +56,7 @@ export async function createPersona(dataDir: string, namespace: string, input: C
 
 export async function updatePromptProfile(
     dataDir: string, namespace: string, sessionId: string,
-    input: UpdatePromptProfileRequest, agent?: SelectedAgentProfile | null,
+    input: UpdatePromptProfileRequest, agent?: SelectedAgentProfile | null, defaultAgent?: SelectedAgentProfile | null,
 ): Promise<PromptProfileState> {
     return updateSettings(getSettingsFile(dataDir), settings => {
         const profiles = profilesForNamespace(settings.promptProfiles, namespace)
@@ -62,7 +66,10 @@ export async function updatePromptProfile(
         const previous = selectionForSession(profiles, sessionId)
         const selection = {
             personaId: input.personaId === undefined ? previous.personaId : input.personaId,
-            agent: input.agentId === undefined ? previous.agent : agent ?? null,
+            agent: input.useDefaultAgent ? previous.defaultAgent ?? null
+                : input.defaultAgentId ? defaultAgent ?? null
+                : input.agentId === undefined ? previous.agent : agent ?? null,
+            defaultAgent: input.defaultAgentId === undefined ? previous.defaultAgent ?? null : defaultAgent ?? null,
         }
         const next = { ...profiles, sessions: { ...profiles.sessions, [sessionId]: selection } }
         return {

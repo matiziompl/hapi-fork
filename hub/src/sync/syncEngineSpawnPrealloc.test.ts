@@ -8,6 +8,63 @@ import { SyncEngine } from './syncEngine'
  * to the runner so buildCliArgs can stamp argv before the first webhook.
  */
 describe('SyncEngine.spawnSession preallocates HAPI id for fresh machine spawns', () => {
+    it('finishes profile preparation for the reserved id before dispatching Runner RPC', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        const calls: string[] = []
+        let preparedId: string | undefined
+        try {
+            engine.getOrCreateMachine('machine-profile', { host: 'localhost', platform: 'linux', happyCliVersion: '0.1.0' }, null, 'default')
+            ;(engine as unknown as { rpcGateway: { spawnSession: unknown } }).rpcGateway.spawnSession = async (...args: unknown[]) => {
+                calls.push('dispatch')
+                expect(preparedId).toBe(args[17] as string | undefined)
+                expect(store.sessions.getSession(preparedId!)?.id).toBe(preparedId)
+                return { type: 'success', sessionId: args[17] }
+            }
+            const result = await engine.spawnSession(
+                'machine-profile', '/tmp/project', 'codex',
+                undefined, undefined, undefined, undefined, undefined, undefined,
+                undefined, undefined, undefined, undefined, undefined, undefined,
+                undefined, 'default', async sessionId => {
+                    expect(store.sessions.getSession(sessionId)?.id).toBe(sessionId)
+                    await Promise.resolve()
+                    preparedId = sessionId
+                    calls.push('prepared')
+                }
+            )
+            expect(result.type).toBe('success')
+            expect(calls).toEqual(['prepared', 'dispatch'])
+        } finally { engine.stop() }
+    })
+
+    it('does not dispatch and removes its unlaunched stub when profile preparation fails', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        let reservedId: string | undefined
+        let dispatches = 0
+        try {
+            engine.getOrCreateMachine('machine-profile-fail', { host: 'localhost', platform: 'linux', happyCliVersion: '0.1.0' }, null, 'default')
+            ;(engine as unknown as { rpcGateway: { spawnSession: unknown } }).rpcGateway.spawnSession = async (...args: unknown[]) => {
+                dispatches += 1
+                return { type: 'success', sessionId: args[17] }
+            }
+            const spawn = engine.spawnSession(
+                'machine-profile-fail', '/tmp/project', 'codex',
+                undefined, undefined, undefined, undefined, undefined, undefined,
+                undefined, undefined, undefined, undefined, undefined, undefined,
+                undefined, 'default', async sessionId => {
+                    reservedId = sessionId
+                    throw new Error('Could not save default profile')
+                }
+            )
+            await expect(spawn).rejects.toThrow('Could not save default profile')
+            expect(dispatches).toBe(0)
+            expect(reservedId).toBeDefined()
+            expect(store.sessions.getSession(reservedId!)).toBeNull()
+            expect(engine.getSession(reservedId!)).toBeUndefined()
+        } finally { engine.stop() }
+    })
+
     it('creates a hub row and forwards that id as reservedSessionId', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(

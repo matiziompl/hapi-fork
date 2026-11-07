@@ -504,6 +504,17 @@ export class RpcGateway {
         )
     }
 
+    async listAgentProfilesForMachine(machineId: string, flavor: string, cwd: string) {
+        const paths = await this.checkPathsExist(machineId, [cwd])
+        if (paths.exists[cwd] !== true || paths.outsideWorkspaceRoots?.includes(cwd)) {
+            throw new Error('The working directory is unavailable or outside workspace roots')
+        }
+        return discoverAgentProfiles(
+            command => this.machineRpc(machineId, RPC_METHODS.Bash, { command, timeout: 10_000 }, 15_000) as Promise<RpcCommandResponse>,
+            flavor, cwd,
+        )
+    }
+
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }

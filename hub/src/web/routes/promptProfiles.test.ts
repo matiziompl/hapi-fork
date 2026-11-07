@@ -19,14 +19,25 @@ async function setup() {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-personas-'))
     directories.push(dataDir)
     const sent: Array<{ text: string; promptPrefix?: string }> = []
+    let active = true
+    const agents = [
+        { id: 'reviewer', name: 'reviewer', description: 'Review changes', source: 'project', instruction: 'Find regressions.' },
+        { id: 'writer', name: 'writer', description: 'Write changes', source: 'user', instruction: 'Write clearly.' },
+    ]
+    const machineQueries: Array<{ machineId: string; flavor: string; cwd: string }> = []
     const engine = {
         resolveSessionAccess: (id: string, namespace: string) => namespace === 'denied'
             ? { ok: false, reason: 'access-denied' }
-            : { ok: true, sessionId: id, session: { id, active: true, metadata: { flavor: 'codex', path: '/project' } } },
+            : { ok: true, sessionId: id, session: { id, active, metadata: { flavor: 'codex', path: '/project' } } },
         listAgentProfiles: async (_id: string, flavor: string, cwd: string) => {
             expect(flavor).toBe('codex')
             expect(cwd).toBe('/project')
-            return { agents: [{ id: 'reviewer', name: 'reviewer', description: 'Review changes', source: 'project', instruction: 'Find regressions.' }] }
+            return { agents }
+        },
+        getMachine: (id: string) => id === 'missing' ? undefined : { id, namespace: 'default', active: true },
+        listAgentProfilesForMachine: async (machineId: string, flavor: string, cwd: string) => {
+            machineQueries.push({ machineId, flavor, cwd })
+            return { agents, warning: 'A definition was skipped.' }
         },
         sendMessage: async (_id: string, payload: { text: string; promptPrefix?: string }) => { sent.push(payload) },
     } as unknown as SyncEngine
@@ -42,7 +53,7 @@ async function setup() {
         headers: { 'content-type': 'application/json', 'x-test-namespace': namespace },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    return { app, request, dataDir, sent }
+    return { app, request, dataDir, sent, machineQueries, setActive: (value: boolean) => { active = value } }
 }
 
 test('personas persist in the Hub, remain namespace-scoped, and selection is per session', async () => {
@@ -96,4 +107,62 @@ test('lists real agent summaries, validates selection and prepends agent plus pe
     expect((await request('/sessions/s1/agent-profiles', undefined, 'denied')).status).toBe(403)
     await request('/sessions/s1/prompt-profile', { agentId: null }, 'default', 'PUT')
     expect(await getPromptProfilePrefix(dataDir, 'default', 's1')).toBe('Persona: Concise\nKeep answers short.\n\n')
+})
+
+test('conversation default survives active changes and resume, and restores its saved instructions while inactive', async () => {
+    const { request, dataDir, setActive } = await setup()
+    const select = (body: unknown) => request('/sessions/s1/prompt-profile', body, 'default', 'PUT')
+    expect((await select({ defaultAgentId: 'reviewer' })).status).toBe(200)
+    let state = await readPromptProfile(dataDir, 'default', 's1')
+    expect(state.defaultAgent?.id).toBe('reviewer')
+    expect(state.agent?.id).toBe('reviewer')
+    expect((await select({ agentId: 'writer' })).status).toBe(200)
+    state = await readPromptProfile(dataDir, 'default', 's1')
+    expect(state.defaultAgent?.id).toBe('reviewer')
+    expect(state.agent?.id).toBe('writer')
+    expect((await readPromptProfile(dataDir, 'default', 's2')).defaultAgent).toBeNull()
+    expect((await readPromptProfile(dataDir, 'other', 's1')).defaultAgent).toBeNull()
+    await copyPromptProfileSelection(dataDir, 'default', 's1', 'resumed')
+    expect((await readPromptProfile(dataDir, 'default', 'resumed')).defaultAgent?.id).toBe('reviewer')
+    expect((await readPromptProfile(dataDir, 'default', 'resumed')).agent?.id).toBe('writer')
+    setActive(false)
+    expect((await select({ useDefaultAgent: true })).status).toBe(200)
+    expect(await getPromptProfilePrefix(dataDir, 'default', 's1')).toBe('Find regressions.\n\n')
+    expect((await select({ defaultAgentId: null })).status).toBe(200)
+    state = await readPromptProfile(dataDir, 'default', 's1')
+    expect(state.defaultAgent).toBeNull()
+    expect(state.agent?.id).toBe('reviewer')
+    expect((await select({ useDefaultAgent: true })).status).toBe(200)
+    expect((await readPromptProfile(dataDir, 'default', 's1')).agent).toBeNull()
+})
+
+test('default selection rejects missing profiles, inactive discovery, unauthorized writes and ambiguous changes', async () => {
+    const { request, dataDir, setActive } = await setup()
+    const select = (body: unknown, namespace = 'default') => request('/sessions/s1/prompt-profile', body, namespace, 'PUT')
+    for (const body of [
+        { defaultAgentId: 'invented' }, { defaultAgentId: '' }, { useDefaultAgent: false },
+        { defaultAgentId: 'reviewer', agentId: 'writer' },
+        { useDefaultAgent: true, agentId: 'writer' },
+        { useDefaultAgent: true, defaultAgentId: 'reviewer' },
+    ]) expect((await select(body)).status).toBe(400)
+    expect((await select({ defaultAgentId: 'reviewer' }, 'denied')).status).toBe(403)
+    expect((await readPromptProfile(dataDir, 'default', 's1')).defaultAgent).toBeNull()
+    setActive(false)
+    expect((await select({ defaultAgentId: 'reviewer' })).status).toBe(409)
+})
+
+test('machine catalog is available before session creation with namespace authorization and no instructions exposed', async () => {
+    const { request, machineQueries } = await setup()
+    const response = await request('/machines/m1/agent-profiles?flavor=codex&cwd=%2Fproject')
+    expect(response.status).toBe(200)
+    const catalog = await response.json() as { agents: Array<Record<string, unknown>>; warning?: string }
+    expect(catalog.agents.map(agent => agent.id)).toEqual(['reviewer', 'writer'])
+    expect(catalog.agents[0]).not.toHaveProperty('instruction')
+    expect(catalog.warning).toBe('A definition was skipped.')
+    expect(machineQueries).toEqual([{ machineId: 'm1', flavor: 'codex', cwd: '/project' }])
+    expect((await request('/machines/m1/agent-profiles?flavor=codex&cwd=%2Fproject', undefined, 'denied')).status).toBe(403)
+    expect((await request('/machines/missing/agent-profiles?flavor=codex&cwd=%2Fproject')).status).toBe(404)
+    expect((await request('/machines/m1/agent-profiles?flavor=invalid&cwd=%2Fproject')).status).toBe(400)
+    expect((await request('/machines/m1/agent-profiles?flavor=codex')).status).toBe(400)
+    expect(machineQueries).toHaveLength(1)
 })

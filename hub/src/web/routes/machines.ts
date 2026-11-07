@@ -12,8 +12,9 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireMachine } from './guards'
+import { updatePromptProfile, type SelectedAgentProfile } from '../../config/promptProfiles'
 
-export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null, dataDir?: string): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/machines', (c) => {
@@ -99,6 +100,18 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const startingMode = parsed.data.startingMode
         const namespace = c.get('namespace')
 
+        let defaultAgent: SelectedAgentProfile | undefined
+        if (parsed.data.defaultAgentId) {
+            if (!dataDir) return c.json({ error: 'Prompt profile storage is unavailable' }, 503)
+            try {
+                const catalog = await engine.listAgentProfilesForMachine(machineId, parsed.data.agent ?? 'claude', parsed.data.directory)
+                defaultAgent = catalog.agents.find(value => value.id === parsed.data.defaultAgentId)
+                if (!defaultAgent) return c.json({ error: 'Agent not found. Reload agents and choose an available profile.' }, 400)
+            } catch (error) {
+                return c.json({ error: error instanceof Error ? error.message : 'Could not load agent profiles' }, 503)
+            }
+        }
+
         const result = await engine.spawnSession(
             machineId,
             parsed.data.directory,
@@ -116,7 +129,10 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.collaborationMode,
             parsed.data.copilotAgentMode,
             startingMode,
-            namespace
+            namespace,
+            defaultAgent ? async sessionId => {
+                await updatePromptProfile(dataDir!, namespace, sessionId, { defaultAgentId: defaultAgent!.id }, undefined, defaultAgent)
+            } : undefined
         )
         return c.json(result)
     })

@@ -2354,7 +2354,8 @@ export class SyncEngine {
         startingMode?: 'remote' | 'pty',
         // Required for fresh machine spawns so the runner stamps the HAPI id on
         // argv before the first webhook (#1911 Major: unreapable window).
-        namespace?: string
+        namespace?: string,
+        prepareSession?: (sessionId: string) => Promise<void>
     ): ReturnType<RpcGateway['spawnSession']> {
         // Fresh machine spawns historically omitted existingSessionId, so
         // buildCliArgs could not stamp --hapi-session-id / --existing-session-id.
@@ -2385,6 +2386,17 @@ export class SyncEngine {
                 allocatedSessionId
             )
             preallocated = true
+        }
+
+        if (prepareSession) {
+            if (!preallocated || !allocatedSessionId) throw new Error('Session preparation requires a fresh namespaced session')
+            try {
+                await prepareSession(allocatedSessionId)
+            } catch (error) {
+                // Preparation failed before dispatch; no Runner child can exist.
+                await this.deleteSession(allocatedSessionId)
+                throw error
+            }
         }
 
         let result: Awaited<ReturnType<RpcGateway['spawnSession']>>
@@ -4528,6 +4540,10 @@ export class SyncEngine {
 
     async listAgentProfiles(sessionId: string, flavor: string, cwd: string) {
         return this.rpcGateway.listAgentProfiles(sessionId, flavor, cwd)
+    }
+
+    async listAgentProfilesForMachine(machineId: string, flavor: string, cwd: string) {
+        return this.rpcGateway.listAgentProfilesForMachine(machineId, flavor, cwd)
     }
 
     async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {

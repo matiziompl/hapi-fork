@@ -1,8 +1,10 @@
 import * as Popover from '@radix-ui/react-popover'
+import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useId, useRef, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 import type { ApiClient } from '@/api/client'
-import type { PromptProfileState, UpdatePromptProfileRequest } from '@hapi/protocol'
+import type { AgentProfile, PromptProfileState, UpdatePromptProfileRequest } from '@hapi/protocol'
+import { useAnchoredMenu } from '@/hooks/useAnchoredMenu'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PlusIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
@@ -107,6 +109,10 @@ export function AgentProfilePicker(props: { api: ApiClient; sessionId: string; a
     const { profile, selection } = usePromptProfile(api, sessionId)
     const [open, setOpen] = useState(false)
     const [search, setSearch] = useState('')
+    const [context, setContext] = useState<{ agent: AgentProfile; x: number; y: number } | null>(null)
+    const contextTrigger = useRef<HTMLButtonElement | null>(null)
+    const closeContext = useCallback(() => setContext(null), [])
+    const { menuRef, menuStyle } = useAnchoredMenu({ isOpen: !!context, onClose: closeContext, anchorPoint: context ?? { x: 0, y: 0 }, align: 'start' })
     const catalog = useQuery({
         queryKey: ['agent-profiles', sessionId], queryFn: () => api.listAgentProfiles(sessionId),
         enabled: open && active, staleTime: 0, gcTime: 5 * 60_000, retry: false,
@@ -115,23 +121,49 @@ export function AgentProfilePicker(props: { api: ApiClient; sessionId: string; a
     const choose = async (agentId: string | null) => {
         try { await selection.mutateAsync({ agentId }); setOpen(false) } catch { /* Keep selection errors visible. */ }
     }
-    return <Popover.Root open={open} onOpenChange={value => { setOpen(value); if (value) { setSearch(''); void profile.refetch() } }}>
+    const setDefault = async (agentId: string | null) => {
+        try { await selection.mutateAsync({ defaultAgentId: agentId }); setContext(null) } catch { /* Keep errors visible. */ }
+    }
+    const defaultAgent = profile.data?.defaultAgent
+    return <Popover.Root open={open} onOpenChange={value => { setOpen(value); setContext(null); if (value) { setSearch(''); void profile.refetch() } }}>
         <Popover.Trigger asChild><button type="button" className={buttonClass} aria-label={profile.data?.agent ? `${t('composer.agent')}: ${profile.data.agent.name}` : t('composer.agent')} title={profile.data?.agent?.name ?? t('composer.agent')}>
             <span className="max-w-28 truncate">{profile.data?.agent?.name ?? t('composer.agent')}</span><svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m2 4 3 3 3-3" /></svg>
         </button></Popover.Trigger>
-        <Popover.Portal><Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className={panelClass} aria-label={t('composer.agent')}>
+        <Popover.Portal><Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className={panelClass} aria-label={t('composer.agent')} onInteractOutside={event => {
+            if (event.target instanceof Node && menuRef.current?.contains(event.target)) event.preventDefault()
+        }} onEscapeKeyDown={event => {
+            if (context) { event.preventDefault(); setContext(null); contextTrigger.current?.focus() }
+        }}>
             <div className="p-2"><input type="search" aria-label={t('composer.agentsSearch')} placeholder={t('composer.agentsSearch')} className={inputClass} value={search} onChange={event => setSearch(event.target.value)} /></div>
             <p className="px-3 pb-2 text-xs text-[var(--app-hint)]">{t('composer.agentProfileHint')}</p>
+            {defaultAgent ? <div className="px-3 pb-2 text-xs text-[var(--app-hint)]">
+                <span>{t('composer.conversationDefault')}: {defaultAgent.name}</span>
+                <button type="button" className={`${rowClass} mt-1`} disabled={selection.isPending} onClick={() => void selection.mutateAsync({ useDefaultAgent: true }).catch(() => {})}>{t('composer.agentRestoreDefault')}</button>
+                <button type="button" className={rowClass} disabled={selection.isPending} onClick={() => void setDefault(null)}>{t('composer.agentRemoveDefault')}</button>
+                {active && catalog.isSuccess && !catalog.data.agents.some(agent => agent.id === defaultAgent.id) ? <p role="status">{t('composer.agentDefaultUnavailable')}</p> : null}
+            </div> : null}
             <div className="max-h-64 overflow-y-auto px-1 pb-1">
                 <button type="button" className={rowClass} aria-pressed={!profile.data?.agent} disabled={selection.isPending} onClick={() => void choose(null)}>{t('composer.agentDefault')}</button>
                 {!active ? <p role="status" className="px-3 py-2 text-sm text-[var(--app-hint)]">{t('composer.agentsInactive')}</p> : catalog.isPending ? <p role="status" className="px-3 py-2 text-sm text-[var(--app-hint)]">{t('composer.profilesLoading')}</p> : null}
-                {agents.map(agent => <button type="button" key={agent.id} className={rowClass} aria-pressed={profile.data?.agent?.id === agent.id} disabled={selection.isPending} onClick={() => void choose(agent.id)}>
-                    <span className="block break-words font-medium">{agent.name}</span><span className="mt-0.5 block whitespace-pre-wrap break-words text-xs text-[var(--app-hint)]">{agent.description}</span>
-                </button>)}
+                {agents.map(agent => <div key={agent.id} className="flex items-center" onContextMenu={event => { event.preventDefault(); contextTrigger.current = event.currentTarget.querySelector('button'); setContext({ agent, x: event.clientX, y: event.clientY }) }}>
+                    <button type="button" className={`${rowClass} min-w-0 flex-1`} aria-pressed={profile.data?.agent?.id === agent.id} disabled={selection.isPending} onClick={() => void choose(agent.id)} onKeyDown={event => {
+                        if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                            event.preventDefault(); contextTrigger.current = event.currentTarget; const bounds = event.currentTarget.getBoundingClientRect(); setContext({ agent, x: bounds.left, y: bounds.bottom })
+                        }
+                    }}>
+                        <span className="flex items-center gap-2 break-words font-medium">{agent.name}{profile.data?.agent?.id === agent.id ? <svg aria-label={t('composer.agentActive')} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 12 4 4L19 6" /></svg> : null}</span><span className="mt-0.5 block whitespace-pre-wrap break-words text-xs text-[var(--app-hint)]">{agent.description}</span>
+                    </button>
+                    <button type="button" className={`${buttonClass} mr-1 h-9 w-9 px-0 ${defaultAgent?.id === agent.id ? 'text-[var(--app-link)]' : ''}`} aria-label={t(defaultAgent?.id === agent.id ? 'composer.agentRemoveNamedDefault' : 'composer.agentSetNamedDefault', { name: agent.name })} aria-pressed={defaultAgent?.id === agent.id} disabled={selection.isPending} onClick={() => void setDefault(defaultAgent?.id === agent.id ? null : agent.id)}>
+                        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill={defaultAgent?.id === agent.id ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></svg>
+                    </button>
+                </div>)}
                 {active && !catalog.isPending && !catalog.error && !catalog.data?.warning && agents.length === 0 ? <p role="status" className="px-3 py-2 text-sm text-[var(--app-hint)]">{t(search ? 'composer.agentsNoMatch' : 'composer.agentsEmpty')}</p> : null}
                 {catalog.data?.warning ? <p role="status" className="px-3 py-2 text-xs text-[var(--app-hint)]">{catalog.data.warning}</p> : null}
                 {catalog.error || profile.error || selection.error ? <p role="alert" className="px-3 py-2 text-sm text-[var(--app-badge-error-text)]">{(catalog.error ?? profile.error ?? selection.error)?.message}</p> : null}
             </div>
+            {context ? createPortal(<div ref={menuRef} role="menu" aria-label={context.agent.name} style={menuStyle} className="fixed z-[90] max-w-72 rounded-lg border border-[var(--app-divider)] bg-[var(--app-bg)] p-1 text-[var(--app-fg)] shadow-lg" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setContext(null); contextTrigger.current?.focus() } }}>
+                <button type="button" role="menuitem" className={rowClass} disabled={selection.isPending} onClick={() => void setDefault(defaultAgent?.id === context.agent.id ? null : context.agent.id)}>{t(defaultAgent?.id === context.agent.id ? 'composer.agentRemoveDefault' : 'composer.agentSetDefault')}</button>
+            </div>, document.body) : null}
             {active ? <div className="flex justify-end border-t border-[var(--app-divider)] p-1"><button type="button" className={buttonClass} disabled={catalog.isFetching} onClick={() => void catalog.refetch()}>{t('composer.agentsReload')}</button></div> : null}
         </Popover.Content></Popover.Portal>
     </Popover.Root>

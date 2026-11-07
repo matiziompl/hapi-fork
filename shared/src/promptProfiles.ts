@@ -20,12 +20,16 @@ export type PromptProfileState = {
     personas: Persona[]
     personaId: string | null
     agent: AgentProfile | null
+    defaultAgent: AgentProfile | null
 }
 
 export const UpdatePromptProfileRequestSchema = z.object({
     personaId: z.string().min(1).max(100).nullable().optional(),
     agentId: z.string().min(1).max(1000).nullable().optional(),
-}).refine(value => value.personaId !== undefined || value.agentId !== undefined)
+    defaultAgentId: z.string().min(1).max(1000).nullable().optional(),
+    useDefaultAgent: z.literal(true).optional(),
+}).refine(value => value.personaId !== undefined || value.agentId !== undefined || value.defaultAgentId !== undefined || value.useDefaultAgent === true)
+    .refine(value => [value.agentId !== undefined, value.defaultAgentId !== undefined, value.useDefaultAgent === true].filter(Boolean).length <= 1)
 export type UpdatePromptProfileRequest = z.infer<typeof UpdatePromptProfileRequestSchema>
 
 // Stored text stays exactly as typed. Only delivery to the existing CLI

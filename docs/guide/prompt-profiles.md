@@ -22,10 +22,30 @@ update script keeps this file in the destination data directory.
 
 The **Agent** selector stays at the right end of the composer toolbar, outside
 the scrolling group. Open it to discover profiles on the session's own machine,
-and search by name or description. **Default agent** clears the profile. The
+and search by name or description. **No profile** clears the active profile. The
 picker supports loading, empty results, no matches, read errors and manual reload.
 Discovery and selecting a new agent require an active session; clearing a
 selection and creating/selecting a persona are also available while inactive.
+
+Each conversation can also save a **default agent**, independently of its active
+profile. Right-click a profile and choose **Set as default for this conversation**, or use
+the star button at the right of its row. A filled star marks the default; a check
+marks the active profile. Setting a default activates it immediately. Ordinary
+selection changes only the active profile. **Return to default**
+restores the saved instructions, including while the conversation is inactive.
+Removing the default leaves the active selection unchanged. Opening the picker,
+reopening a conversation or sending a message never resets either choice.
+Keyboard users can open the context menu with Shift+F10 or the Context Menu key.
+
+The new-conversation form offers **Default conversation agent** after selecting
+the machine, CLI and workspace. It discovers profiles on that machine before
+launching a session; changing the machine, CLI or directory invalidates the
+current form choice. The Hub revalidates the profile and saves its instructions
+before dispatching the session launch. Existing conversations acquire no default
+automatically. Defaults are saved in the Hub per conversation and namespace,
+shared across devices, and carried through resume/reopen alongside the active
+selection. Saved defaults are instruction snapshots: removing or changing a
+profile file does not silently replace a conversation's saved instructions.
 
 Selecting an agent applies its saved instructions before subsequent ordinary
 messages. It does not spawn an independent subagent or change the native CLI's
@@ -33,10 +53,14 @@ model, tools, permissions, hooks or process identity. Those still follow the
 session's existing settings. The description in the picker makes this behavior
 explicit. Reselect a profile after changing its file to refresh its instructions.
 
-The Hub uses the existing authenticated, session-scoped Bash RPC and a read-only
-Node.js probe. It does not assume access to Runner paths through its own
-filesystem. Node.js must be available on the session machine, as for the existing
-status probe. No Runner source or wire protocol is changed.
+The Hub uses the existing authenticated Bash RPC and a read-only Node.js probe.
+Conversation discovery is session-scoped; pre-creation discovery is machine-scoped
+and first checks that the working directory exists and is allowed by the Runner's
+workspace policy. The probe still includes user profiles, repository ancestors
+and configured file references as described below. The Hub does not assume access
+to Runner paths through its own filesystem. Node.js must be available on the
+session machine, as for the existing status probe. No Runner source or wire
+protocol is changed.
 
 Discovery reads user and project agent definitions for the session's CLI:
 
