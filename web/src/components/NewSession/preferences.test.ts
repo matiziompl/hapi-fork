@@ -1,15 +1,28 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
     loadPreferredAgent,
+    loadPreferredDefaultAgent,
     loadPreferredLaunchSettings,
     loadPreferredYoloMode,
     resolvePreferredLaunchSettings,
     savePreferredAgent,
+    savePreferredDefaultAgent,
     savePreferredLaunchSettings,
     savePreferredYoloMode,
 } from './preferences'
 
 describe('NewSession preferences', () => {
+    it('remembers a conversation profile or explicit No profile separately per machine and CLI', () => {
+        expect(loadPreferredDefaultAgent('machine-1', 'codex')).toBeNull()
+        savePreferredDefaultAgent('machine-1', 'codex', 'lead-engineer')
+        savePreferredDefaultAgent('machine-2', 'codex', 'reviewer')
+        savePreferredDefaultAgent('machine-1', 'claude', '')
+        expect(loadPreferredDefaultAgent('machine-1', 'codex')).toBe('lead-engineer')
+        expect(loadPreferredDefaultAgent('machine-2', 'codex')).toBe('reviewer')
+        expect(loadPreferredDefaultAgent('machine-1', 'claude')).toBe('')
+        expect(loadPreferredDefaultAgent('machine-2', 'claude')).toBeNull()
+    })
+
     beforeEach(() => {
         localStorage.clear()
     })

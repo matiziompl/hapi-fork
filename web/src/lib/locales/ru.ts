@@ -22,6 +22,7 @@ export default {
   'composer.agentDefaultUnavailable': 'Профиль недоступен. Сохранённые инструкции действуют, пока вы их не уберёте или не замените.',
   'composer.agentActive': 'Активный профиль',
   'newSession.agentProfileHint': 'Сохраняется для этой беседы. Открытие списка агентов не меняет выбор.',
+  'newSession.agentProfileUnavailable': 'Сохранённый профиль недоступен в этой рабочей папке. Выберите другой профиль или «Без профиля».',
   'newSession.agentProfileChooseDirectory': 'Выберите машину и существующую рабочую папку для загрузки профилей.',
   'newSession.agentProfileSaveFailed': 'Беседа открыта, но агент по умолчанию не сохранён. Выберите его в беседе.',
   "composer.agentsSearch": "Поиск агентов",

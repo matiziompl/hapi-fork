@@ -83,7 +83,7 @@ describe('DefaultAgentSelector', () => {
         expect(screen.getByRole('combobox')).toHaveValue('removed-agent')
         fireEvent.click(screen.getByRole('button', { name: 'composer.agentsReload' }))
         await screen.findByRole('option', { name: 'Reviewer' })
-        expect(screen.getByRole('alert')).toHaveTextContent('composer.agentDefaultUnavailable')
+        expect(screen.getByRole('alert')).toHaveTextContent('newSession.agentProfileUnavailable')
         expect(screen.getByRole('status')).toHaveTextContent('Some definitions were skipped.')
         expect(screen.getByRole('combobox')).toHaveValue('removed-agent')
         expect(onChange).not.toHaveBeenCalled()

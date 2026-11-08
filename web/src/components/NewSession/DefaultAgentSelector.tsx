@@ -42,7 +42,7 @@ export function DefaultAgentSelector(props: {
         {catalog.loading ? <p role="status" className="text-xs text-[var(--app-hint)]">{t('composer.profilesLoading')}</p> : null}
         {catalog.error ? <p role="alert" className="text-xs text-[var(--app-badge-error-text)]">{catalog.error}</p> : null}
         {catalog.warning ? <p role="status" className="text-xs text-[var(--app-hint)]">{catalog.warning}</p> : null}
-        {enabled && props.value && !catalog.loading && !catalog.error && !catalog.agents.some(agent => agent.id === props.value) ? <p role="alert" className="text-xs text-[var(--app-badge-error-text)]">{t('composer.agentDefaultUnavailable')}</p> : null}
+        {enabled && props.value && !catalog.loading && !catalog.error && !catalog.agents.some(agent => agent.id === props.value) ? <p role="alert" className="text-xs text-[var(--app-badge-error-text)]">{t('newSession.agentProfileUnavailable')}</p> : null}
         {enabled ? <button type="button" disabled={props.disabled || catalog.loading} className="text-xs text-[var(--app-link)] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" onClick={() => setReload(value => value + 1)}>{t('composer.agentsReload')}</button> : null}
     </div>
 }

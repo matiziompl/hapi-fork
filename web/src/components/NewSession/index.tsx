@@ -70,10 +70,12 @@ import { groupModelsByProvider } from '@/components/AssistantChat/piModelGroups'
 import { isThinkingLevelSupported } from '@/components/AssistantChat/piThinkingLevelOptions'
 import {
     loadPreferredAgent,
+    loadPreferredDefaultAgent,
     loadPreferredLaunchSettings,
     loadPreferredYoloMode,
     resolvePreferredLaunchSettings,
     savePreferredAgent,
+    savePreferredDefaultAgent,
     savePreferredLaunchSettings,
     savePreferredYoloMode,
 } from './preferences'
@@ -115,7 +117,9 @@ export function NewSession(props: {
     const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
     const [defaultAgentChoice, setDefaultAgentChoice] = useState<{ scope: string; id: string } | undefined>()
     const defaultAgentScope = JSON.stringify([machineId, agent, directory.trim()])
-    const defaultAgentId = defaultAgentChoice?.scope === defaultAgentScope ? defaultAgentChoice.id : undefined
+    const defaultAgentId = defaultAgentChoice?.scope === defaultAgentScope
+        ? defaultAgentChoice.id
+        : machineId ? loadPreferredDefaultAgent(machineId, agent) ?? undefined : undefined
     useEffect(() => {
         if (defaultAgentChoice && defaultAgentChoice.scope !== defaultAgentScope) setDefaultAgentChoice(undefined)
     }, [defaultAgentChoice, defaultAgentScope])
@@ -1720,9 +1724,15 @@ export function NewSession(props: {
     }, [])
 
     const applyImportedDefault = async (sessionId: string) => {
-        if (!defaultAgentId) return
+        if (defaultAgentId === undefined || !machineId) return
         try {
-            await props.api.updatePromptProfile(sessionId, { defaultAgentId })
+            if (defaultAgentId) {
+                await props.api.updatePromptProfile(sessionId, { defaultAgentId })
+            } else {
+                await props.api.updatePromptProfile(sessionId, { defaultAgentId: null })
+                await props.api.updatePromptProfile(sessionId, { agentId: null })
+            }
+            savePreferredDefaultAgent(machineId, agent, defaultAgentId)
         } catch {
             // The imported session already exists; open it instead of offering a duplicate import.
             addToast({ title: t('newSession.agentProfileSaveFailed'), body: '', sessionId, url: `/sessions/${sessionId}` })
@@ -1955,6 +1965,7 @@ export function NewSession(props: {
             if (result.type === 'success') {
                 haptic.notification('success')
                 savePreferredLaunchSettings(machineId, agent, preferredLaunchSettings)
+                savePreferredDefaultAgent(machineId, agent, defaultAgentId ?? '')
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
@@ -2080,7 +2091,7 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled || agentAvailability.isLoading || Boolean(agentAvailability.error)}
                 onAgentChange={handleAgentChange}
             />
-            <DefaultAgentSelector api={props.api} machineId={machineId} flavor={agent} cwd={trimmedDirectory} directoryExists={pathExistence[trimmedDirectory]} value={defaultAgentId ?? ''} disabled={isFormDisabled} onChange={id => setDefaultAgentChoice(id ? { scope: defaultAgentScope, id } : undefined)} />
+            <DefaultAgentSelector api={props.api} machineId={machineId} flavor={agent} cwd={trimmedDirectory} directoryExists={pathExistence[trimmedDirectory]} value={defaultAgentId ?? ''} disabled={isFormDisabled} onChange={id => setDefaultAgentChoice({ scope: defaultAgentScope, id })} />
             {agentAvailability.isLoading ? (
                 <div className="px-3 py-2 text-xs text-[var(--app-hint)]">
                     {t('newSession.agentAvailabilityLoading')}

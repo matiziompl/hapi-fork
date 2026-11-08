@@ -22,6 +22,7 @@ export default {
   'composer.agentDefaultUnavailable': '此配置不可用。已保存的指令会保留，直到清除或替换。',
   'composer.agentActive': '当前配置',
   'newSession.agentProfileHint': '仅保存到此会话。打开智能体列表不会改变选择。',
+  'newSession.agentProfileUnavailable': '此工作目录中无法使用记住的配置。请选择其他配置或“不使用配置”。',
   'newSession.agentProfileChooseDirectory': '选择机器和现有工作目录以加载配置。',
   'newSession.agentProfileSaveFailed': '会话已打开，但默认智能体保存失败。请在会话中选择。',
   "composer.agentsSearch": "搜索智能体",

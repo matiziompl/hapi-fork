@@ -17,6 +17,7 @@ import { LEGACY_YOLO_BRIDGE_AGENTS, usesSharedPermissionModeState } from '@/lib/
 const AGENT_STORAGE_KEY = 'hapi:newSession:agent'
 const YOLO_STORAGE_KEY = 'hapi:newSession:yolo'
 const LAUNCH_SETTINGS_STORAGE_PREFIX = 'hapi:newSession:launchSettings:v1'
+const DEFAULT_AGENT_STORAGE_PREFIX = 'hapi:newSession:defaultAgent:v1'
 
 export type PreferredLaunchSettings = {
     model: string
@@ -68,6 +69,23 @@ export function savePreferredYoloMode(enabled: boolean): void {
 
 function launchSettingsStorageKey(machineId: string, agent: AgentType): string {
     return `${LAUNCH_SETTINGS_STORAGE_PREFIX}:${encodeURIComponent(machineId)}:${agent}`
+}
+
+export function loadPreferredDefaultAgent(machineId: string, agent: AgentType): string | null {
+    try {
+        const stored = localStorage.getItem(`${DEFAULT_AGENT_STORAGE_PREFIX}:${encodeURIComponent(machineId)}:${agent}`)
+        return stored !== null && stored.length <= 1000 ? stored : null
+    } catch {
+        return null
+    }
+}
+
+export function savePreferredDefaultAgent(machineId: string, agent: AgentType, agentId: string): void {
+    try {
+        localStorage.setItem(`${DEFAULT_AGENT_STORAGE_PREFIX}:${encodeURIComponent(machineId)}:${agent}`, agentId)
+    } catch {
+        // Ignore storage errors, as with the other launch preferences.
+    }
 }
 
 export function loadPreferredLaunchSettings(

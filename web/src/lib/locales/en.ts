@@ -1057,6 +1057,7 @@ export default {
   'composer.agentDefaultUnavailable': 'This profile is unavailable. The saved instructions remain until you clear or replace them.',
   'composer.agentActive': 'Active profile',
   'newSession.agentProfileHint': 'Saved for this conversation. Opening the agent picker will not change it.',
+  'newSession.agentProfileUnavailable': 'The remembered profile is unavailable in this workspace. Choose another profile or No profile.',
   'newSession.agentProfileChooseDirectory': 'Choose a machine and an existing workspace to load profiles.',
   'newSession.agentProfileSaveFailed': 'Conversation opened, but its default agent could not be saved. Choose it in the conversation.',
   'composer.agentsSearch': 'Search agents',

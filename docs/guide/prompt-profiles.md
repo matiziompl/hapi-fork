@@ -39,8 +39,14 @@ Keyboard users can open the context menu with Shift+F10 or the Context Menu key.
 
 The new-conversation form offers **Default conversation agent** after selecting
 the machine, CLI and workspace. It discovers profiles on that machine before
-launching a session; changing the machine, CLI or directory invalidates the
-current form choice. The Hub revalidates the profile and saves its instructions
+launching a session. After successful creation, the browser remembers the chosen
+profile (including **No profile**) separately for each machine and CLI. The next
+new conversation starts with that choice, including in another workspace. An
+unavailable remembered profile remains visible with a warning so it can be
+replaced or cleared explicitly. Canceling creation or a failed launch does not
+replace the remembered choice. This creation preference is local to the browser;
+it is separate from each conversation's saved default on the Hub. The Hub
+revalidates the profile and saves its instructions
 before dispatching the session launch. Existing conversations acquire no default
 automatically. Defaults are saved in the Hub per conversation and namespace,
 shared across devices, and carried through resume/reopen alongside the active
